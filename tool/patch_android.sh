@@ -87,4 +87,6 @@ if [[ -f "$SRC_ACTIVITY" ]]; then
   echo "Patched MainActivity.kt (extends AudioServiceActivity)"
 fi
 
+bash "$ROOT/tool/configure_android_release_signing.sh"
+
 echo "Patched AndroidManifest.xml for audiobook app"

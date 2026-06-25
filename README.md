@@ -74,6 +74,28 @@ APK output: `build/app/outputs/flutter-apk/app-release.apk`
 
 On GitHub, use **Actions → Build APK → Run workflow** (if CI is enabled on this repo).
 
+#### Signed release builds (CI)
+
+Without signing secrets, CI builds a release APK signed with the **debug** key (fine for sideloading and testing, not for Play Store).
+
+To produce a properly signed release APK in GitHub Actions, add these repository secrets:
+
+| Secret | Value |
+|--------|--------|
+| `ANDROID_KEYSTORE_BASE64` | Base64-encoded `.jks` / `.keystore` file |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_PASSWORD` | Key password |
+| `ANDROID_KEY_ALIAS` | Key alias |
+
+Generate a keystore locally:
+
+```bash
+keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+base64 -w0 upload-keystore.jks   # Linux; use for ANDROID_KEYSTORE_BASE64
+```
+
+Local signed builds use the same `android/key.properties` file (created from your keystore; never commit it).
+
 ### Cloud sync build flags (optional)
 
 ```bash
