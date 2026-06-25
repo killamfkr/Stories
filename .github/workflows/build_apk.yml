@@ -35,6 +35,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
       - name: Configure release signing
         if: env.ANDROID_KEYSTORE_BASE64 != ''
         env:

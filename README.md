@@ -58,7 +58,7 @@ flutter create . --project-name audiobook_app --org com.playtorrio.audiobook
 bash tool/patch_android.sh
 
 flutter pub get
-dart run flutter_launcher_icons   # optional
+dart run flutter_launcher_icons
 flutter run
 ```
 
