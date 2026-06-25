@@ -90,6 +90,14 @@ To produce a properly signed release APK in GitHub Actions, add these repository
 Generate a keystore locally:
 
 ```bash
+bash tool/generate_release_keystore.sh
+```
+
+This writes `.secrets/upload-keystore.jks` and `.secrets/keystore-credentials.env` (gitignored). Copy the four values into GitHub Actions secrets.
+
+Or manually:
+
+```bash
 keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
 base64 -w0 upload-keystore.jks   # Linux; use for ANDROID_KEYSTORE_BASE64
 ```
