@@ -105,7 +105,7 @@ jobs:
           VERSION="$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr '+' '-')"
           APK_NAME="stories-${VERSION}.apk"
           cp build/app/outputs/flutter-apk/app-release.apk "$APK_NAME"
-          echo "RELEASE_TAG=v${VERSION}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v${VERSION}" >> "$GITHUB_ENV"
           echo "APK_NAME=${APK_NAME}" >> "$GITHUB_ENV"
 
       - name: Upload APK artifact
@@ -115,12 +115,19 @@ jobs:
           path: ${{ env.APK_NAME }}
           if-no-files-found: error
 
-      - name: Create draft GitHub release
-        uses: softprops/action-gh-release@v2
+      - name: Create or update draft GitHub release
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ env.RELEASE_TAG }}
+          tag: ${{ env.RELEASE_TAG }}
           name: Stories ${{ env.RELEASE_TAG }}
           draft: true
-          prerelease: false
-          files: ${{ env.APK_NAME }}
-          generate_release_notes: true
+          allowUpdates: true
+          replacesArtifacts: true
+          artifacts: ${{ env.APK_NAME }}
+          artifactContentType: application/vnd.android.package-archive
+          body: |
+            Draft Android release for Stories **${{ env.RELEASE_TAG }}**.
+
+            Built from commit ${{ github.sha }} on ${{ github.run_id }}.
+            Rebuilds with the same `pubspec.yaml` version update this draft.
+            Bump the app version in `pubspec.yaml` to create a new release line.
