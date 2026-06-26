@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:audio_service/audio_service.dart';
@@ -9,6 +10,7 @@ import 'android_auto_ids.dart';
 import 'audiobook_prefs_keys.dart';
 import 'audio_handler.dart';
 import 'torrent_stream_service.dart';
+import 'notification_cover_cache.dart';
 import '../services/playtorrio_cloud_sync_service.dart';
 import 'settings_service.dart';
 
@@ -58,6 +60,44 @@ class AudiobookPlayerService {
   /// Lowest position we know the user has reached this chapter — never snap UI/audio below it.
   int _positionFloorMs = 0;
   DateTime? _lastCorrectiveSeekAt;
+  Uri? _cachedArtUri;
+
+  bool _isLoopbackArtUrl(String url) {
+    final lower = url.toLowerCase();
+    return lower.contains('127.0.0.1') ||
+        lower.contains('localhost') ||
+        lower.contains('::1');
+  }
+
+  Uri? _resolveArtUri(Audiobook book) {
+    if (_cachedArtUri != null) return _cachedArtUri;
+    var art = book.thumbUrl.trim();
+    if (art.isEmpty) art = book.coverImage.trim();
+    if (art.isEmpty || _isLoopbackArtUrl(art)) return null;
+    return Uri.tryParse(art);
+  }
+
+  bool _isTorrentBackedBook(Audiobook book) {
+    final magnet = book.magnetLink;
+    return (book.source == 'magnet' || book.source == 'audiobookbay') &&
+        magnet != null &&
+        magnet.trim().isNotEmpty;
+  }
+
+  void _releaseTorrentForBook(Audiobook book) {
+    if (!_isTorrentBackedBook(book)) return;
+    TorrentStreamService().releaseAudiobookMagnet(book.magnetLink!);
+  }
+
+  Future<void> setNotificationCoverBytes(Uint8List bytes) async {
+    final book = currentBook.value;
+    if (book == null || bytes.isEmpty) return;
+    final uri = await cacheNotificationCover(book.audioBookId, bytes);
+    if (uri == null) return;
+    _cachedArtUri = uri;
+    _syncMediaItem();
+    _syncChapterQueue();
+  }
 
   void _raisePositionFloor(Duration resolved) {
     final ms = resolved.inMilliseconds;
@@ -263,6 +303,7 @@ class AudiobookPlayerService {
       }
       _startProgressTicker();
     }
+    _syncMediaItem();
     _updateSystemState();
   }
 
@@ -475,9 +516,6 @@ class AudiobookPlayerService {
     if (book.source == 'magnet') artist = 'Torrent';
     if (book.source == 'audiobookbay') artist = 'Audiobook Bay';
 
-    String art = book.thumbUrl.trim();
-    if (art.isEmpty) art = book.coverImage.trim();
-
     final dur = duration.value;
     unawaited(handler.updateMediaItem(MediaItem(
       id: book.audioBookId,
@@ -485,7 +523,7 @@ class AudiobookPlayerService {
       title: chapterTitle.isEmpty ? book.title : chapterTitle,
       artist: artist,
       duration: dur > Duration.zero ? dur : null,
-      artUri: art.isEmpty ? null : Uri.tryParse(art),
+      artUri: _resolveArtUri(book),
     )));
   }
 
@@ -519,6 +557,12 @@ class AudiobookPlayerService {
   }
 
   Future<void> loadBook(Audiobook book, List<AudiobookChapter> chapters, {int initialChapter = 0, Duration? resumePosition}) async {
+    final previous = currentBook.value;
+    if (previous != null && previous.audioBookId != book.audioBookId) {
+      _releaseTorrentForBook(previous);
+    }
+    _cachedArtUri = null;
+
     final chapterCount = chapters.length;
     final idx = chapterCount == 0
         ? 0
@@ -566,16 +610,13 @@ class AudiobookPlayerService {
     if (book.source == 'magnet') artist = 'Torrent';
     if (book.source == 'audiobookbay') artist = 'Audiobook Bay';
 
-    String art = book.thumbUrl.trim();
-    if (art.isEmpty) art = book.coverImage.trim();
-
     _handler?.updateMediaItem(MediaItem(
       id: book.audioBookId,
       album: book.title,
       title: chapterTitle.isEmpty ? book.title : chapterTitle,
       artist: artist,
       duration: duration.value > Duration.zero ? duration.value : null,
-      artUri: art.isEmpty ? null : Uri.tryParse(art),
+      artUri: _resolveArtUri(book),
     ));
 
     _syncChapterQueue();
@@ -719,7 +760,14 @@ class AudiobookPlayerService {
   }
 
   Future<void> stop() async {
+    final book = currentBook.value;
     await _player.stop();
+    if (book != null) {
+      _releaseTorrentForBook(book);
+    }
+    isPlaying.value = false;
+    isBuffering.value = false;
+    isPreparingPlayback.value = false;
     _updateSystemState();
   }
 
@@ -939,17 +987,16 @@ class AudiobookPlayerService {
     final book = currentBook.value;
     if (handler == null || book == null || _currentChapters.isEmpty) return;
 
+    final artUri = _resolveArtUri(book);
     final items = List<MediaItem>.generate(_currentChapters.length, (i) {
       final chapter = _currentChapters[i];
-      var art = book.thumbUrl.trim();
-      if (art.isEmpty) art = book.coverImage.trim();
       return MediaItem(
         id: AndroidAutoIds.chapter(book.audioBookId, i),
         album: book.title,
         title:
             chapter.title.isEmpty ? 'Chapter ${i + 1}' : chapter.title,
         artist: 'Stories',
-        artUri: art.isEmpty ? null : Uri.tryParse(art),
+        artUri: artUri,
       );
     });
     handler.queue.add(items);

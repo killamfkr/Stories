@@ -226,8 +226,9 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
         Uri.parse(coverUrl),
         headers: AudiobookPlayerService.magnetStreamHttpHeaders,
       );
-      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty && mounted) {
-        setState(() => _magnetCoverBytes = res.bodyBytes);
+      if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+        if (mounted) setState(() => _magnetCoverBytes = res.bodyBytes);
+        unawaited(_service.setNotificationCoverBytes(res.bodyBytes));
       }
     } catch (_) {}
   }
@@ -245,13 +246,6 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
   @override
   void dispose() {
     unawaited(_service.saveManualProgress());
-    if (widget.audiobook.magnetLink != null &&
-        widget.audiobook.magnetLink!.isNotEmpty &&
-        (widget.audiobook.source == 'magnet' ||
-            widget.audiobook.source == 'audiobookbay')) {
-      TorrentStreamService()
-          .releaseAudiobookMagnet(widget.audiobook.magnetLink!);
-    }
     super.dispose();
   }
 
@@ -271,7 +265,6 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
 
   void _handleExit() async {
     await _service.saveManualProgress();
-    await _service.stop();
     if (mounted) Navigator.pop(context);
   }
 

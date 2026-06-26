@@ -203,7 +203,7 @@ class PlayTorrioAudioHandler extends BaseAudioHandler
     if (_currentType == AudioPlayerType.music) {
       await _musicPlayer.stop();
     } else {
-      await (_activePlayer as mk.Player).stop();
+      await AudiobookPlayerService().stop();
     }
     return super.stop();
   }
