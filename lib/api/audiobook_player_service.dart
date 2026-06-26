@@ -95,8 +95,53 @@ class AudiobookPlayerService {
     final uri = await cacheNotificationCover(book.audioBookId, bytes);
     if (uri == null) return;
     _cachedArtUri = uri;
-    _syncMediaItem();
+    publishNowPlaying();
+  }
+
+  /// Pushes queue, metadata, and playback state to the system media session.
+  void publishNowPlaying() {
     _syncChapterQueue();
+    _syncMediaItem();
+    _updateSystemState();
+  }
+
+  void _scheduleNowPlayingRefresh() {
+    publishNowPlaying();
+    Future<void>.delayed(const Duration(milliseconds: 400), publishNowPlaying);
+    Future<void>.delayed(const Duration(seconds: 2), publishNowPlaying);
+  }
+
+  MediaItem? _buildCurrentMediaItem() {
+    final book = currentBook.value;
+    if (book == null) return null;
+
+    final idx = currentChapterIndex.value;
+    final chapters = _currentChapters;
+    final chapterTitle = (idx >= 0 && idx < chapters.length)
+        ? chapters[idx].title
+        : '';
+
+    String artist = 'Tokybook';
+    if (book.source == 'audiozaic') artist = 'Audiozaic';
+    if (book.source == 'goldenaudiobook') artist = 'GoldenAudiobook';
+    if (book.source == 'appaudiobooks') artist = 'AppAudiobooks';
+    if (book.source == 'magnet') artist = 'Torrent';
+    if (book.source == 'audiobookbay') artist = 'Audiobook Bay';
+
+    final title = chapterTitle.isEmpty ? book.title : chapterTitle;
+    final dur = duration.value;
+
+    return MediaItem(
+      id: AndroidAutoIds.chapter(book.audioBookId, idx),
+      album: book.title,
+      title: title,
+      artist: artist,
+      displayTitle: title,
+      displaySubtitle: book.title,
+      displayDescription: artist,
+      duration: dur > Duration.zero ? dur : null,
+      artUri: _resolveArtUri(book),
+    );
   }
 
   void _raisePositionFloor(Duration resolved) {
@@ -244,6 +289,9 @@ class AudiobookPlayerService {
         _stopProgressTicker();
       }
       _updateSystemState();
+      if (pl && !wasPlaying) {
+        _scheduleNowPlayingRefresh();
+      }
       if (wasPlaying && !pl && !_isResuming && currentBook.value != null) {
         unawaited(_saveProgress(force: true));
       }
@@ -305,9 +353,17 @@ class AudiobookPlayerService {
     }
     _syncMediaItem();
     _updateSystemState();
+    _scheduleNowPlayingRefresh();
   }
 
-  /// Torrent loopback streams often report duration/position late — wait briefly.
+  Future<void> _playThroughHandler() async {
+    final handler = _handler;
+    if (handler != null) {
+      await handler.play();
+      return;
+    }
+    await _player.play();
+  }
   Future<void> _waitForPlaybackClock({
     Duration timeout = const Duration(seconds: 5),
     Duration minPrepare = const Duration(milliseconds: 200),
@@ -499,36 +555,19 @@ class AudiobookPlayerService {
   }
 
   void _syncMediaItem() {
-    final book = currentBook.value;
     final handler = _handler;
-    if (book == null || handler == null) return;
-
-    final idx = currentChapterIndex.value;
-    final chapters = _currentChapters;
-    final chapterTitle = (idx >= 0 && idx < chapters.length)
-        ? chapters[idx].title
-        : '';
-
-    String artist = 'Tokybook';
-    if (book.source == 'audiozaic') artist = 'Audiozaic';
-    if (book.source == 'goldenaudiobook') artist = 'GoldenAudiobook';
-    if (book.source == 'appaudiobooks') artist = 'AppAudiobooks';
-    if (book.source == 'magnet') artist = 'Torrent';
-    if (book.source == 'audiobookbay') artist = 'Audiobook Bay';
-
-    final dur = duration.value;
-    unawaited(handler.updateMediaItem(MediaItem(
-      id: book.audioBookId,
-      album: book.title,
-      title: chapterTitle.isEmpty ? book.title : chapterTitle,
-      artist: artist,
-      duration: dur > Duration.zero ? dur : null,
-      artUri: _resolveArtUri(book),
-    )));
+    final item = _buildCurrentMediaItem();
+    if (handler == null || item == null) return;
+    unawaited(handler.updateMediaItem(item));
   }
 
   void _updateSystemState() {
     if (_handler == null || currentBook.value == null) return;
+
+    final playing = isPlaying.value;
+    final processingState = playing && isBuffering.value
+        ? AudioProcessingState.buffering
+        : AudioProcessingState.ready;
     
     _handler!.updateState(PlaybackState(
       controls: [
@@ -547,8 +586,8 @@ class AudiobookPlayerService {
         MediaAction.skipToPrevious,
       },
       androidCompactActionIndices: const [0, 1, 3],
-      processingState: isBuffering.value ? AudioProcessingState.buffering : AudioProcessingState.ready,
-      playing: isPlaying.value,
+      processingState: processingState,
+      playing: playing,
       updatePosition: position.value,
       bufferedPosition: _player.state.buffer,
       speed: _player.state.rate,
@@ -599,26 +638,6 @@ class AudiobookPlayerService {
 
     _handler?.setPlayerType(AudioPlayerType.audiobook, _player);
 
-    final chapterTitle = (idx >= 0 && idx < chapters.length)
-        ? chapters[idx].title
-        : '';
-
-    String artist = 'Tokybook';
-    if (book.source == 'audiozaic') artist = 'Audiozaic';
-    if (book.source == 'goldenaudiobook') artist = 'GoldenAudiobook';
-    if (book.source == 'appaudiobooks') artist = 'AppAudiobooks';
-    if (book.source == 'magnet') artist = 'Torrent';
-    if (book.source == 'audiobookbay') artist = 'Audiobook Bay';
-
-    _handler?.updateMediaItem(MediaItem(
-      id: book.audioBookId,
-      album: book.title,
-      title: chapterTitle.isEmpty ? book.title : chapterTitle,
-      artist: artist,
-      duration: duration.value > Duration.zero ? duration.value : null,
-      artUri: _resolveArtUri(book),
-    ));
-
     _syncChapterQueue();
 
     // Optimize for streaming audiobooks (once per player).
@@ -666,7 +685,7 @@ class AudiobookPlayerService {
         await Future.delayed(const Duration(milliseconds: 300));
         await _waitForResumeReady(book, chapters[idx]);
         await _settleResumePosition(resumePosition!);
-        await _player.play();
+        await _playThroughHandler();
         resumeAlreadyPlaying = true;
       } else {
         await _player.play();
@@ -680,7 +699,7 @@ class AudiobookPlayerService {
     }
 
     if (!resumeAlreadyPlaying) {
-      await _player.play();
+      await _playThroughHandler();
     }
 
     await _waitForPlaybackClock();
@@ -787,7 +806,7 @@ class AudiobookPlayerService {
     try {
       final media = await _mediaForChapter(book, _currentChapters[index]);
       await _player.open(media, play: false);
-      await _player.play();
+      await _playThroughHandler();
       await _waitForPlaybackClock(timeout: const Duration(seconds: 4));
       _finishPreparingPlayback();
     } catch (e, st) {

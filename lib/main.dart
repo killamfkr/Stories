@@ -40,6 +40,9 @@ Future<void> main() async {
         androidNotificationChannelName: 'Stories playback',
         androidNotificationChannelDescription:
             'Playback controls and now playing for Stories',
+        androidNotificationChannelImportance:
+            AndroidNotificationChannelImportance.high,
+        androidNotificationIcon: 'mipmap/ic_launcher',
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: false,
         androidResumeOnClick: true,
