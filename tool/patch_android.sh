@@ -34,7 +34,6 @@ else
         android:icon="@mipmap/ic_launcher"
         android:appCategory="audio"
         android:usesCleartextTraffic="true"
-        android:extractNativeLibs="true"
         android:largeHeap="true">
         <activity
             android:name=".MainActivity"
@@ -102,5 +101,6 @@ fi
 
 bash "$ROOT/tool/configure_android_release_signing.sh"
 bash "$ROOT/tool/configure_android_sdk_versions.sh"
+bash "$ROOT/tool/configure_android_packaging.sh"
 
 echo "Patched AndroidManifest.xml for audiobook app"

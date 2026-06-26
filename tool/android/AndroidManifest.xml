@@ -16,7 +16,6 @@
         android:icon="@mipmap/ic_launcher"
         android:appCategory="audio"
         android:usesCleartextTraffic="true"
-        android:extractNativeLibs="true"
         android:largeHeap="true">
         <activity
             android:name=".MainActivity"
