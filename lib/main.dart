@@ -25,6 +25,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
   AudiobookPlayerService().ensurePlayerListeners();
+  unawaited(AudiobookPlayerService().ensurePlaybackRateLoaded());
 
   await _configureAudioSession();
   if (platformIsAndroid) {

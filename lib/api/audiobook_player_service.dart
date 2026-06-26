@@ -46,6 +46,7 @@ class AudiobookPlayerService {
   bool _playerListenersAttached = false;
   bool _mpvAudiobookTuned = false;
   bool _playbackRateLoaded = false;
+  Future<void>? _playbackRateLoadFuture;
   Timer? _progressTicker;
   bool _isResuming = false;
   Timer? _progressSaveDebounce;
@@ -170,6 +171,11 @@ class AudiobookPlayerService {
   }
 
   bool _acceptPlayerPosition(Duration playerPosition) {
+    if (_positionFloorMs > 0 &&
+        playerPosition.inMilliseconds > _positionFloorMs + 120_000) {
+      return false;
+    }
+
     if (_positionFloorMs > 8000 &&
         playerPosition.inMilliseconds < _positionFloorMs - 5000) {
       _maybeCorrectiveSeek();
@@ -356,6 +362,7 @@ class AudiobookPlayerService {
     _syncMediaItem();
     _updateSystemState();
     _scheduleNowPlayingRefresh();
+    unawaited(_applyPlaybackRate(force: true));
   }
 
   Future<void> _playThroughHandler() async {
@@ -736,8 +743,14 @@ class AudiobookPlayerService {
 
     await _waitForPlaybackClock();
     _isResuming = false;
-    await _applyPlaybackRate();
+    await _applyPlaybackRate(force: true);
     _finishPreparingPlayback(positionHint: preparingPositionHint);
+    unawaited(
+      Future<void>.delayed(
+        const Duration(milliseconds: 600),
+        () => _applyPlaybackRate(force: true),
+      ),
+    );
   }
 
   Future<Media> _mediaForChapter(
@@ -806,26 +819,37 @@ class AudiobookPlayerService {
   void seek(Duration p) => unawaited(seekTo(p));
 
   Future<void> ensurePlaybackRateLoaded() async {
+    _playbackRateLoadFuture ??= _loadPlaybackRateFromPrefs();
+    await _playbackRateLoadFuture;
+  }
+
+  Future<void> _loadPlaybackRateFromPrefs() async {
     if (_playbackRateLoaded) return;
-    _playbackRateLoaded = true;
     final speed = await SettingsService().getPlaybackSpeed();
     playbackRate.value = speed;
+    _playbackRateLoaded = true;
     await _player.setRate(speed);
   }
 
   Future<void> setRate(double r) async {
+    await ensurePlaybackRateLoaded();
     final speed = r.clamp(0.5, 3.0);
     playbackRate.value = speed;
-    await _player.setRate(speed);
+    await _applyPlaybackRate(force: true);
     await SettingsService().setPlaybackSpeed(speed);
     _updateSystemState();
   }
 
-  Future<void> _applyPlaybackRate() async {
+  Future<void> _applyPlaybackRate({bool force = false}) async {
     await ensurePlaybackRateLoaded();
     final speed = playbackRate.value;
-    if ((_player.state.rate - speed).abs() > 0.01) {
-      await _player.setRate(speed);
+    if (!force && (_player.state.rate - speed).abs() <= 0.01) return;
+    await _player.setRate(speed);
+    if (_player.platform is NativePlayer) {
+      try {
+        await (_player.platform as NativePlayer)
+            .setProperty('speed', speed.toStringAsFixed(2));
+      } catch (_) {}
     }
   }
 
@@ -895,8 +919,14 @@ class AudiobookPlayerService {
       await _player.open(media, play: false);
       await _playThroughHandler();
       await _waitForPlaybackClock(timeout: const Duration(seconds: 4));
-      await _applyPlaybackRate();
+      await _applyPlaybackRate(force: true);
       _finishPreparingPlayback();
+      unawaited(
+        Future<void>.delayed(
+          const Duration(milliseconds: 600),
+          () => _applyPlaybackRate(force: true),
+        ),
+      );
     } catch (e, st) {
       isPreparingPlayback.value = false;
       debugPrint('AudiobookPlayerService.changeChapter: $e\n$st');
@@ -990,8 +1020,10 @@ class AudiobookPlayerService {
         if (outMs < 500 && pMs > 1_000) {
           outMs = pMs;
         } else if (outMs + 15_000 < pMs) {
-          // Never regress saved progress on the same chapter.
-          outMs = pMs;
+          // Honor bookmark resume / backward scrub below saved history.
+          if (_positionFloorMs <= 0 || outMs < _positionFloorMs - 5_000) {
+            outMs = pMs;
+          }
         }
       }
     }

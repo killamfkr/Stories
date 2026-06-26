@@ -154,6 +154,7 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
   }
 
   Future<void> _bootstrapPlayback() async {
+    await _service.ensurePlaybackRateLoaded();
     final book = widget.audiobook;
     final magnet = book.magnetLink;
     final needsMagnet = (book.source == 'magnet' || book.source == 'audiobookbay') &&
@@ -194,6 +195,9 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
           resumePosition: widget.initialPosition,
         ),
       ]);
+      if (mounted) {
+        setState(() => _playbackSpeed = _service.playbackRate.value);
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

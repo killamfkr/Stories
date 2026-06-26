@@ -299,23 +299,6 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
             : (hpmRaw is num ? hpmRaw.toInt() : int.tryParse('$hpmRaw') ?? 0);
         break;
       }
-    } else {
-      // Continue Listening: use the freshest saved row for this title.
-      final hist = await _playerService.getHistory();
-      for (final h in hist) {
-        final b = h['book'];
-        if (b is! Map) continue;
-        if ('${b['audioBookId']}' != book.audioBookId) continue;
-        final hciRaw = h['chapterIndex'];
-        final hpmRaw = h['positionMs'];
-        chapterIndex = hciRaw is int
-            ? hciRaw
-            : (hciRaw is num ? hciRaw.toInt() : int.tryParse('$hciRaw') ?? 0);
-        positionMs = hpmRaw is int
-            ? hpmRaw
-            : (hpmRaw is num ? hpmRaw.toInt() : int.tryParse('$hpmRaw') ?? 0);
-        break;
-      }
     }
 
     final hasSavedPlace = chapterIndex > 0 || positionMs > 0;
