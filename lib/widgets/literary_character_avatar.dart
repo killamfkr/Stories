@@ -1,33 +1,33 @@
 import 'package:flutter/material.dart';
 
-/// Harry Potter character avatars from Apryll Clark's Behance icon set.
-/// https://www.behance.net/gallery/71431093/Harry-Potter-Icon-Set
+/// Original book + literary character avatars for profile pictures.
 class LiteraryAvatarInfo {
-  const LiteraryAvatarInfo(this.label, this.assetPath);
+  const LiteraryAvatarInfo(this.label, this.subtitle, this.assetPath);
 
   final String label;
+  final String subtitle;
   final String assetPath;
 }
 
 const List<LiteraryAvatarInfo> kLiteraryAvatars = [
-  LiteraryAvatarInfo('Harry Potter', 'assets/avatars/01_harry.png'),
-  LiteraryAvatarInfo('Hermione Granger', 'assets/avatars/02_hermione.png'),
-  LiteraryAvatarInfo('Ron Weasley', 'assets/avatars/03_ron.png'),
-  LiteraryAvatarInfo('Ginny Weasley', 'assets/avatars/04_ginny.png'),
-  LiteraryAvatarInfo('Draco Malfoy', 'assets/avatars/05_draco.png'),
-  LiteraryAvatarInfo('Neville Longbottom', 'assets/avatars/06_neville.png'),
-  LiteraryAvatarInfo('Rubeus Hagrid', 'assets/avatars/07_hagrid.png'),
-  LiteraryAvatarInfo('Albus Dumbledore', 'assets/avatars/08_dumbledore.png'),
-  LiteraryAvatarInfo('Minerva McGonagall', 'assets/avatars/09_mcgonagall.png'),
-  LiteraryAvatarInfo('Bellatrix Lestrange', 'assets/avatars/10_bellatrix.png'),
-  LiteraryAvatarInfo('Severus Snape', 'assets/avatars/11_snape.png'),
-  LiteraryAvatarInfo('Lord Voldemort', 'assets/avatars/12_voldemort.png'),
+  LiteraryAvatarInfo('Storyteller', 'Open golden book', 'assets/avatars/01_storyteller.png'),
+  LiteraryAvatarInfo('Wizard', 'Spellbook & wand', 'assets/avatars/02_wizard.png'),
+  LiteraryAvatarInfo('Detective', 'Mystery journal', 'assets/avatars/03_detective.png'),
+  LiteraryAvatarInfo('Princess', 'Fairy tale folio', 'assets/avatars/04_princess.png'),
+  LiteraryAvatarInfo('Pirate', 'Captain\'s log', 'assets/avatars/05_pirate.png'),
+  LiteraryAvatarInfo('Scholar', 'Ancient tome', 'assets/avatars/06_scholar.png'),
+  LiteraryAvatarInfo('Knight', 'Hero\'s chronicle', 'assets/avatars/07_knight.png'),
+  LiteraryAvatarInfo('Dragon', 'Fantasy grimoire', 'assets/avatars/08_dragon.png'),
+  LiteraryAvatarInfo('Voyager', 'Star atlas', 'assets/avatars/09_voyager.png'),
+  LiteraryAvatarInfo('Romantic', 'Poetry volume', 'assets/avatars/10_romantic.png'),
+  LiteraryAvatarInfo('Gothic', 'Dark novel', 'assets/avatars/11_gothic.png'),
+  LiteraryAvatarInfo('Dreamer', 'Picture books', 'assets/avatars/12_dreamer.png'),
 ];
 
 int clampLiteraryAvatarIndex(int index) =>
     index % kLiteraryAvatars.length;
 
-/// Circular profile avatar using bundled Harry Potter character art.
+/// Circular profile avatar with bundled book/character art.
 class LiteraryCharacterAvatar extends StatelessWidget {
   const LiteraryCharacterAvatar({
     super.key,
@@ -67,9 +67,10 @@ class LiteraryCharacterAvatar extends StatelessWidget {
           width: size,
           height: size,
           fit: BoxFit.cover,
+          filterQuality: FilterQuality.high,
           errorBuilder: (_, __, ___) => ColoredBox(
             color: const Color(0xFF1A1A22),
-            child: Icon(Icons.person, size: size * 0.5, color: Colors.white54),
+            child: Icon(Icons.menu_book_rounded, size: size * 0.5, color: Colors.white54),
           ),
         ),
       ),

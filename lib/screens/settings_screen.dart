@@ -109,7 +109,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Text(
-              'Pick a Harry Potter character for your profile.',
+              'Pick a reader avatar — each one pairs a classic book character with their story.',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(height: 1.4),
             ),
           ),
