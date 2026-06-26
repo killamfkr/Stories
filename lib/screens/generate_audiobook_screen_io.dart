@@ -1,22 +1,15 @@
 import 'dart:async';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import '../api/paper2audio_service.dart';
 import '../api/audiobook_service.dart';
 import '../api/music_player_service.dart';
-import '../api/epub_splitter.dart';
 import '../api/epub_cover.dart';
 import '../utils/app_theme.dart';
 import 'audiobook_player_screen.dart';
 import '../widgets/tv_interactive.dart';
-
-/// Top-level worker for `compute` so the EPUB parsing/splitting runs off the UI thread.
-Future<List<EpubPart>> _splitWorker(String path) {
-  return EpubSplitter.splitIfNeeded(File(path));
-}
 
 class GenerateAudiobookScreen extends StatefulWidget {
   const GenerateAudiobookScreen({super.key});
@@ -74,14 +67,9 @@ class _GenerateAudiobookScreenState extends State<GenerateAudiobookScreen> {
 
     setState(() => _uploading = true);
     try {
-      // Analyze + split off the UI thread.
-      final parts = await compute(_splitWorker, file.path);
-
-      // Extract cover from the original EPUB once; share across parts.
       final originalBytes = await file.readAsBytes();
-      final safeName = file.path
-          .split(Platform.pathSeparator)
-          .last
+      final fileName = file.path.split(Platform.pathSeparator).last;
+      final safeName = fileName
           .replaceAll(RegExp(r'\.epub$', caseSensitive: false), '')
           .replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
       final coverPath = await EpubCover.extractAndSave(
@@ -89,51 +77,16 @@ class _GenerateAudiobookScreenState extends State<GenerateAudiobookScreen> {
         saveAsName: '${safeName}_${DateTime.now().millisecondsSinceEpoch}',
       );
 
-      if (parts.length > 1) {
-        if (!mounted) return;
-        final totalWords =
-            parts.fold<int>(0, (a, p) => a + p.wordCount);
-        final ok = await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: const Text('EPUB exceeds 250,000 words'),
-            content: Text(
-              'This book has ~${_formatWords(totalWords)} words, which is over the 250k limit per generation.\n\n'
-              'It will be split into ${parts.length} parts at a chapter boundary and queued as separate jobs:\n\n'
-              '${parts.map((p) => '• ${p.suggestedName} (~${_formatWords(p.wordCount)} words)').join('\n')}',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Split & Upload'),
-              ),
-            ],
-          ),
-        );
-        if (ok != true) {
-          if (mounted) setState(() => _uploading = false);
-          return;
-        }
-      }
-
-      for (final part in parts) {
-        await _svc.uploadBytes(
-          bytes: part.bytes,
-          fileName: part.suggestedName,
-          voiceId: _voiceId,
-          coverPath: coverPath,
-        );
-      }
+      await _svc.uploadBytes(
+        bytes: originalBytes,
+        fileName: fileName,
+        voiceId: _voiceId,
+        coverPath: coverPath,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(parts.length == 1
-              ? 'Uploaded — generation started on the server.'
-              : 'Uploaded ${parts.length} parts — generation started.'),
+        const SnackBar(
+          content: Text('Uploaded — generation started on the server.'),
         ),
       );
       _refreshAndScheduleNext();
@@ -145,13 +98,6 @@ class _GenerateAudiobookScreenState extends State<GenerateAudiobookScreen> {
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
-  }
-
-  String _formatWords(int n) {
-    if (n >= 1000) {
-      return '${(n / 1000).toStringAsFixed(n >= 100000 ? 0 : 1)}k';
-    }
-    return n.toString();
   }
 
   Future<void> _copyUrl(String url) async {

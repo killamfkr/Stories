@@ -164,7 +164,7 @@ class Paper2AudioService {
     return uploadBytes(bytes: bytes, fileName: fileName, voiceId: voiceId);
   }
 
-  /// Uploads raw EPUB bytes (use this after splitting an oversized EPUB).
+  /// Uploads raw EPUB bytes and queues a generation job.
   Future<GeneratedAudiobookJob> uploadBytes({
     required Uint8List bytes,
     required String fileName,
