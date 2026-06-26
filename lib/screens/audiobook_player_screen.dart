@@ -572,7 +572,10 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
                     valueListenable: _service.isPreparingPlayback,
                     builder: (context, preparing, _) {
                       final hasDuration = dur > Duration.zero;
-                      final displayPos = preparing ? Duration.zero : pos;
+                      final displayPos =
+                          (preparing && pos <= Duration.zero)
+                              ? Duration.zero
+                              : pos;
                       final dValue =
                           hasDuration ? dur.inMilliseconds.toDouble() : 1.0;
                       final pValue = displayPos.inMilliseconds.toDouble();
