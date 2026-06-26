@@ -5,6 +5,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:audio_service/audio_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audiobook_service.dart';
+import 'android_auto_ids.dart';
 import 'audiobook_prefs_keys.dart';
 import 'audio_handler.dart';
 import 'torrent_stream_service.dart';
@@ -77,6 +78,13 @@ class AudiobookPlayerService {
   void attachHandler(BaseAudioHandler handler) {
     _handler = handler as PlayTorrioAudioHandler;
   }
+
+  PlayTorrioAudioHandler? get audioHandler => _handler;
+
+  List<AudiobookChapter> get currentChapters =>
+      List<AudiobookChapter>.unmodifiable(_currentChapters);
+
+  int get currentChapterCount => _currentChapters.length;
 
   /// Attaches media_kit listeners. Safe to call even when [AudioService] failed.
   void ensurePlayerListeners() {
@@ -347,6 +355,7 @@ class AudiobookPlayerService {
       updatePosition: position.value,
       bufferedPosition: _player.state.buffer,
       speed: _player.state.rate,
+      queueIndex: currentChapterIndex.value,
     ));
   }
 
@@ -402,6 +411,8 @@ class AudiobookPlayerService {
       duration: duration.value > Duration.zero ? duration.value : null,
       artUri: art.isEmpty ? null : Uri.tryParse(art),
     ));
+
+    _syncChapterQueue();
 
     // Optimize for streaming audiobooks (once per player).
     final torrentBacked = book.source == 'magnet' || book.source == 'audiobookbay';
@@ -561,6 +572,7 @@ class AudiobookPlayerService {
     if (book == null) return;
     _resetPlaybackUiState();
     _syncMediaItem();
+    _syncChapterQueue();
     _ignoreProgressPersistenceUntil =
         DateTime.now().add(const Duration(milliseconds: 1200));
     try {
@@ -688,6 +700,87 @@ class AudiobookPlayerService {
     final prefs = await SharedPreferences.getInstance();
     final List<String> history = prefs.getStringList(AudiobookPrefsKeys.history) ?? [];
     return history.map((s) => json.decode(s) as Map<String, dynamic>).toList();
+  }
+
+  Future<void> resumeFromAndroidAuto(String audioBookId) async {
+    final history = await getHistory();
+    for (final progress in history) {
+      final rawBook = progress['book'];
+      if (rawBook is! Map) continue;
+      if ('${rawBook['audioBookId']}' != audioBookId) continue;
+
+      final book = Audiobook.fromJson(Map<String, dynamic>.from(rawBook));
+      final ciRaw = progress['chapterIndex'];
+      final chapterIndex = ciRaw is int
+          ? ciRaw
+          : (ciRaw is num ? ciRaw.toInt() : int.tryParse('$ciRaw') ?? 0);
+      final pmRaw = progress['positionMs'];
+      final positionMs = pmRaw is int
+          ? pmRaw
+          : (pmRaw is num ? pmRaw.toInt() : int.tryParse('$pmRaw') ?? 0);
+
+      final prepared = await AudiobookService().prepareAudiobookPlayback(book);
+      await loadBook(
+        prepared.book,
+        prepared.chapters,
+        initialChapter: chapterIndex,
+        resumePosition:
+            positionMs > 0 ? Duration(milliseconds: positionMs) : null,
+      );
+      return;
+    }
+    debugPrint(
+      'AudiobookPlayerService: no history entry for Android Auto $audioBookId',
+    );
+  }
+
+  Future<void> playChapterFromAndroidAuto(String audioBookId, int index) async {
+    final book = currentBook.value;
+    if (book != null && book.audioBookId == audioBookId) {
+      await changeChapter(index);
+      return;
+    }
+
+    final history = await getHistory();
+    for (final progress in history) {
+      final rawBook = progress['book'];
+      if (rawBook is! Map) continue;
+      if ('${rawBook['audioBookId']}' != audioBookId) continue;
+
+      final histBook = Audiobook.fromJson(Map<String, dynamic>.from(rawBook));
+      final prepared =
+          await AudiobookService().prepareAudiobookPlayback(histBook);
+      await loadBook(
+        prepared.book,
+        prepared.chapters,
+        initialChapter: index,
+      );
+      return;
+    }
+    debugPrint(
+      'AudiobookPlayerService: cannot play chapter for unknown book $audioBookId',
+    );
+  }
+
+  void _syncChapterQueue() {
+    final handler = _handler;
+    final book = currentBook.value;
+    if (handler == null || book == null || _currentChapters.isEmpty) return;
+
+    final items = List<MediaItem>.generate(_currentChapters.length, (i) {
+      final chapter = _currentChapters[i];
+      var art = book.thumbUrl.trim();
+      if (art.isEmpty) art = book.coverImage.trim();
+      return MediaItem(
+        id: AndroidAutoIds.chapter(book.audioBookId, i),
+        album: book.title,
+        title:
+            chapter.title.isEmpty ? 'Chapter ${i + 1}' : chapter.title,
+        artist: 'Stories',
+        artUri: art.isEmpty ? null : Uri.tryParse(art),
+      );
+    });
+    handler.queue.add(items);
   }
 
   Future<void> removeFromHistory(String audioBookId) async {

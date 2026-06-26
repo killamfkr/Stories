@@ -1,0 +1,76 @@
+name: Build APK
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: |
+          flutter create . --project-name audiobook_app --org com.playtorrio.audiobook
+          bash tool/patch_android.sh
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Configure release signing
+        if: env.ANDROID_KEYSTORE_BASE64 != ''
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          cat > android/key.properties <<EOF
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          storeFile=upload-keystore.jks
+          EOF
+
+      - name: Build release APK
+        env:
+          PLAYTORRIO_SUPABASE_URL: ${{ secrets.PLAYTORRIO_SUPABASE_URL }}
+          PLAYTORRIO_SUPABASE_ANON_KEY: ${{ secrets.PLAYTORRIO_SUPABASE_ANON_KEY }}
+        run: |
+          build_args=()
+          if [[ -n "${PLAYTORRIO_SUPABASE_URL}" && -n "${PLAYTORRIO_SUPABASE_ANON_KEY}" ]]; then
+            build_args+=(
+              "--dart-define=PLAYTORRIO_SUPABASE_URL=${PLAYTORRIO_SUPABASE_URL}"
+              "--dart-define=PLAYTORRIO_SUPABASE_ANON_KEY=${PLAYTORRIO_SUPABASE_ANON_KEY}"
+            )
+          fi
+          flutter build apk --release "${build_args[@]}"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: stories-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

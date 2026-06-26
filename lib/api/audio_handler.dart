@@ -5,10 +5,12 @@ import 'package:media_kit/media_kit.dart' as mk;
 
 import 'audiobook_player_service.dart';
 import 'music_player_service.dart';
+import 'android_auto_browse.dart';
 
 enum AudioPlayerType { music, audiobook }
 
-class PlayTorrioAudioHandler extends BaseAudioHandler with SeekHandler {
+class PlayTorrioAudioHandler extends BaseAudioHandler
+    with QueueHandler, SeekHandler {
   final mk.Player _musicPlayer;
   AudioPlayerType _currentType = AudioPlayerType.music;
   dynamic _activePlayer;
@@ -210,5 +212,29 @@ class PlayTorrioAudioHandler extends BaseAudioHandler with SeekHandler {
   Future<void> onTaskRemoved() async {
     await stop();
     await super.onTaskRemoved();
+  }
+
+  @override
+  Future<List<MediaItem>> getChildren(
+    String parentMediaId, [
+    Map<String, dynamic>? options,
+  ]) {
+    return AndroidAutoBrowse.childrenFor(parentMediaId);
+  }
+
+  @override
+  Future<void> playFromMediaId(String mediaId, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    await AndroidAutoBrowse.playMediaId(mediaId);
+  }
+
+  @override
+  Future<void> skipToQueueItem(int index) async {
+    if (_currentType == AudioPlayerType.audiobook) {
+      await AudiobookPlayerService().changeChapter(index);
+      return;
+    }
+    await super.skipToQueueItem(index);
   }
 }

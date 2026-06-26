@@ -14,6 +14,7 @@
         android:label="Stories"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:appCategory="audio"
         android:usesCleartextTraffic="true"
         android:extractNativeLibs="true"
         android:largeHeap="true">
@@ -57,5 +58,9 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
     </application>
 </manifest>

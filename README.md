@@ -20,6 +20,7 @@ Stories helps you find, listen to, and organize audiobooks without a subscriptio
 - Continue listening remembers chapter and position per title
 - Playback speed, autoplay next chapter, skip forward/back
 - Lock-screen and notification controls on Android (after `tool/patch_android.sh`)
+- **Android Auto** — playback controls and continue listening in the car (media app)
 
 ### Your library
 
@@ -58,7 +59,7 @@ flutter create . --project-name audiobook_app --org com.playtorrio.audiobook
 bash tool/patch_android.sh
 
 flutter pub get
-dart run flutter_launcher_icons   # optional
+dart run flutter_launcher_icons
 flutter run
 ```
 
@@ -73,6 +74,36 @@ flutter build apk --release
 APK output: `build/app/outputs/flutter-apk/app-release.apk`
 
 On GitHub, use **Actions → Build APK → Run workflow** (if CI is enabled on this repo).
+
+#### Signed release builds (CI)
+
+Without signing secrets, CI builds a release APK signed with the **debug** key (fine for sideloading and testing, not for Play Store).
+
+To produce a properly signed release APK in GitHub Actions, add these repository secrets:
+
+| Secret | Value |
+|--------|--------|
+| `ANDROID_KEYSTORE_BASE64` | Base64-encoded `.jks` / `.keystore` file |
+| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
+| `ANDROID_KEY_PASSWORD` | Key password |
+| `ANDROID_KEY_ALIAS` | Key alias |
+
+Generate a keystore locally:
+
+```bash
+bash tool/generate_release_keystore.sh
+```
+
+This writes `.secrets/upload-keystore.jks` and `.secrets/keystore-credentials.env` (gitignored). Copy the four values into GitHub Actions secrets.
+
+Or manually:
+
+```bash
+keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+base64 -w0 upload-keystore.jks   # Linux; use for ANDROID_KEYSTORE_BASE64
+```
+
+Local signed builds use the same `android/key.properties` file (created from your keystore; never commit it).
 
 ### Cloud sync build flags (optional)
 
