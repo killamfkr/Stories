@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -97,9 +100,27 @@ jobs:
           fi
           flutter build apk --release "${build_args[@]}"
 
-      - name: Upload APK
+      - name: Prepare release APK
+        run: |
+          VERSION="$(grep '^version:' pubspec.yaml | sed 's/version:[[:space:]]*//' | tr '+' '-')"
+          APK_NAME="stories-${VERSION}.apk"
+          cp build/app/outputs/flutter-apk/app-release.apk "$APK_NAME"
+          echo "RELEASE_TAG=v${VERSION}-build.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          echo "APK_NAME=${APK_NAME}" >> "$GITHUB_ENV"
+
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: stories-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: ${{ env.APK_NAME }}
           if-no-files-found: error
+
+      - name: Create draft GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Stories ${{ env.RELEASE_TAG }}
+          draft: true
+          prerelease: false
+          files: ${{ env.APK_NAME }}
+          generate_release_notes: true
