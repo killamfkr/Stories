@@ -296,13 +296,11 @@ class AudiobookPlayerService {
 
   /// After play() on a stream, wait until duration/position is available before seeking.
   Future<void> _waitForResumeReady(Audiobook book, AudiobookChapter chapter) async {
-    final torrentResume = (book.source == 'magnet' ||
-            book.source == 'audiobookbay') &&
-        book.magnetLink != null &&
-        book.magnetLink!.trim().isNotEmpty &&
-        chapter.torrentFileIndex != null;
-    if (torrentResume) {
-      await _waitForStreamPrime();
+    if (_isTorrentChapter(book, chapter)) {
+      await _waitForStreamPrime(
+        minWait: const Duration(milliseconds: 200),
+        timeout: const Duration(seconds: 10),
+      );
       return;
     }
 
@@ -615,10 +613,26 @@ class AudiobookPlayerService {
       debugPrint(
         'AudiobookPlayerService: Resuming chapter $idx at $resumePosition',
       );
-      await _player.play();
-      resumeAlreadyPlaying = true;
-      await _waitForResumeReady(book, chapters[idx]);
-      await _settleResumePosition(resumePosition!);
+      final torrentResume = _isTorrentChapter(book, chapters[idx]);
+      if (torrentResume) {
+        // Prime the loopback stream, seek while paused, then start audible playback.
+        await _player.play();
+        await _waitForStreamPrime(
+          minWait: const Duration(milliseconds: 350),
+          timeout: const Duration(seconds: 12),
+        );
+        await _player.pause();
+        await Future.delayed(const Duration(milliseconds: 300));
+        await _waitForResumeReady(book, chapters[idx]);
+        await _settleResumePosition(resumePosition!);
+        await _player.play();
+        resumeAlreadyPlaying = true;
+      } else {
+        await _player.play();
+        resumeAlreadyPlaying = true;
+        await _waitForResumeReady(book, chapters[idx]);
+        await _settleResumePosition(resumePosition!);
+      }
       preparingPositionHint = position.value > Duration.zero
           ? position.value
           : resumePosition;
@@ -637,11 +651,7 @@ class AudiobookPlayerService {
     Audiobook book,
     AudiobookChapter ch,
   ) async {
-    final magnet = book.magnetLink;
-    final torrentBacked = (book.source == 'magnet' || book.source == 'audiobookbay') &&
-        magnet != null &&
-        magnet.isNotEmpty &&
-        ch.torrentFileIndex != null;
+    final torrentBacked = _isTorrentChapter(book, ch);
     if (!torrentBacked) {
       final headers = ch.headers ?? const <String, String>{};
       return Media(
@@ -650,6 +660,7 @@ class AudiobookPlayerService {
       );
     }
 
+    final magnet = book.magnetLink!;
     final torrent = TorrentStreamService();
     final started = await torrent.start();
     if (!started) {
@@ -671,6 +682,14 @@ class AudiobookPlayerService {
       merged.addAll(ch.headers!);
     }
     return Media(url, httpHeaders: merged);
+  }
+
+  bool _isTorrentChapter(Audiobook book, AudiobookChapter ch) {
+    final magnet = book.magnetLink;
+    return (book.source == 'magnet' || book.source == 'audiobookbay') &&
+        magnet != null &&
+        magnet.trim().isNotEmpty &&
+        ch.torrentFileIndex != null;
   }
 
   void playOrPause() {

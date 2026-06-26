@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/audiobook_service.dart';
 import '../api/audiobook_player_service.dart';
 import '../api/music_player_service.dart';
@@ -13,6 +16,8 @@ import 'audiobook_player_screen.dart';
 import 'audiobook_downloads_screen.dart';
 import 'generate_audiobook_screen.dart';
 import '../widgets/tv_interactive.dart';
+import '../widgets/app_update_prompt.dart';
+import '../services/app_update_service.dart';
 import 'audiobook_magnet_screen.dart';
 import 'settings_screen.dart';
 
@@ -75,6 +80,29 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
         );
       });
     }
+    if (platformIsAndroid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_maybeOfferAppUpdate());
+      });
+    }
+  }
+
+  Future<void> _maybeOfferAppUpdate() async {
+    try {
+      final pkg = await AppUpdateService.instance.currentPackageInfo();
+      final prefs = await SharedPreferences.getInstance();
+      final promptKey = 'stories_update_prompt_build';
+      final lastPromptBuild = prefs.getInt(promptKey);
+      final build = int.tryParse(pkg.buildNumber) ?? 0;
+      if (lastPromptBuild == build) return;
+
+      final offer = await AppUpdateService.instance.checkForUpdate();
+      if (!mounted || offer == null) return;
+
+      await prefs.setInt(promptKey, build);
+      if (!mounted) return;
+      await showAppUpdateDialog(context, offer);
+    } catch (_) {}
   }
 
   @override

@@ -2,8 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../api/settings_service.dart';
+import '../platform_flags.dart';
+import '../services/app_update_service.dart';
 import '../services/playtorrio_cloud_sync_service.dart';
 import '../utils/app_theme.dart';
+import '../widgets/app_update_prompt.dart';
 import '../widgets/literary_character_avatar.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -29,6 +32,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _avatarIndex = 0;
   String _torrentCacheType = 'ram';
   int _torrentRamCacheMb = 200;
+  String _appVersionLabel = '';
+  bool _updateChecking = false;
 
   @override
   void initState() {
@@ -52,6 +57,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final cacheType = await _settings.getTorrentCacheType();
       final cacheMb = await _settings.getTorrentRamCacheMb();
       final avatar = await _settings.getUserAvatarIndex();
+      var versionLabel = '';
+      if (platformIsAndroid) {
+        final pkg = await AppUpdateService.instance.currentPackageInfo();
+        versionLabel = '${pkg.version} (${pkg.buildNumber})';
+      }
       if (!mounted) return;
       setState(() {
         _sessionPresent = session;
@@ -61,6 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _avatarIndex = avatar;
         _torrentCacheType = cacheType;
         _torrentRamCacheMb = cacheMb;
+        _appVersionLabel = versionLabel;
       });
     } catch (e) {
       debugPrint('SettingsScreen load failed: $e');
@@ -294,6 +305,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _checkForUpdate() async {
+    if (!platformIsAndroid) {
+      _snack('In-app updates are available on Android.');
+      return;
+    }
+    setState(() => _updateChecking = true);
+    try {
+      final offer = await AppUpdateService.instance.checkForUpdate();
+      if (!mounted) return;
+      if (offer == null) {
+        _snack(
+          _appVersionLabel.isEmpty
+              ? 'Stories is up to date'
+              : 'Stories is up to date ($_appVersionLabel)',
+        );
+        return;
+      }
+      await showAppUpdateDialog(context, offer);
+    } catch (e) {
+      if (mounted) _snack('Update check failed: $e');
+    } finally {
+      if (mounted) setState(() => _updateChecking = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -482,11 +518,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 _sectionCard(
                   title: 'About',
-                  child: const ListTile(
-                    title: Text('Stories'),
-                    subtitle: Text(
-                      'Audiobook player with Audiobook Bay catalog, torrent playback, and cloud library sync.',
-                    ),
+                  child: Column(
+                    children: [
+                      if (platformIsAndroid)
+                        ListTile(
+                          title: const Text('App version'),
+                          subtitle: Text(
+                            _appVersionLabel.isEmpty
+                                ? 'Loading version…'
+                                : _appVersionLabel,
+                          ),
+                          trailing: _updateChecking
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.system_update_alt_outlined),
+                          onTap: _updateChecking ? null : _checkForUpdate,
+                        ),
+                      const ListTile(
+                        title: Text('Stories'),
+                        subtitle: Text(
+                          'Audiobook player with Audiobook Bay catalog, torrent playback, and cloud library sync.',
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

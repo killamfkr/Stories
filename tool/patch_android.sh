@@ -99,6 +99,14 @@ if [[ -f "$SRC_AUTO_XML" ]]; then
   echo "Installed Android Auto automotive_app_desc.xml"
 fi
 
+SRC_FILE_PATHS="$ROOT/tool/android/res/xml/file_paths.xml"
+DEST_FILE_PATHS="$ROOT/android/app/src/main/res/xml/file_paths.xml"
+if [[ -f "$SRC_FILE_PATHS" ]]; then
+  mkdir -p "$(dirname "$DEST_FILE_PATHS")"
+  cp "$SRC_FILE_PATHS" "$DEST_FILE_PATHS"
+  echo "Installed FileProvider file_paths.xml"
+fi
+
 bash "$ROOT/tool/configure_android_release_signing.sh"
 bash "$ROOT/tool/configure_android_sdk_versions.sh"
 bash "$ROOT/tool/configure_android_packaging.sh"

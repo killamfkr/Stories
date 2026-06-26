@@ -1,7 +1,7 @@
 name: audiobook_app
 description: Stories — audiobook player (Audiobook Bay, search, player, downloads).
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.0+2
 
 environment:
   sdk: ^3.11.0
@@ -25,6 +25,8 @@ dependencies:
   path: ^1.9.1
   path_provider: ^2.1.5
   permission_handler: ^11.3.1
+  package_info_plus: ^8.3.0
+  open_filex: ^4.7.0
   libtorrent_flutter: 1.8.2
   file_picker: ^10.3.0
   archive: ^4.0.4
