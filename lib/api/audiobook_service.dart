@@ -298,7 +298,10 @@ class AudiobookService {
 
   /// Loads chapters; for Audiobook Bay this fetches the detail page and attaches [Audiobook.magnetLink].
   Future<({Audiobook book, List<AudiobookChapter> chapters})>
-      prepareAudiobookPlayback(Audiobook book) async {
+      prepareAudiobookPlayback(
+    Audiobook book, {
+    int warmChapterIndex = 0,
+  }) async {
     late final ({Audiobook book, List<AudiobookChapter> chapters}) prepared;
     if (book.source == 'audiobookbay') {
       final magnet = book.magnetLink?.trim() ?? '';
@@ -348,15 +351,20 @@ class AudiobookService {
       final chapters = await getChapters(book);
       prepared = (book: book, chapters: chapters);
     }
-    await _prefetchMagnetIfNeeded(prepared.book, prepared.chapters);
+    await _prefetchMagnetIfNeeded(
+      prepared.book,
+      prepared.chapters,
+      warmChapterIndex: warmChapterIndex,
+    );
     return prepared;
   }
 
-  /// While the library spinner is visible, pull torrent metadata and warm the first chapter stream.
+  /// While the library spinner is visible, pull torrent metadata and warm one chapter stream.
   Future<void> _prefetchMagnetIfNeeded(
     Audiobook book,
-    List<AudiobookChapter> chapters,
-  ) async {
+    List<AudiobookChapter> chapters, {
+    int warmChapterIndex = 0,
+  }) async {
     final magnet = book.magnetLink?.trim() ?? '';
     if (magnet.isEmpty) return;
     if (book.source != 'magnet' && book.source != 'audiobookbay') return;
@@ -364,16 +372,16 @@ class AudiobookService {
     if (!await torrent.start()) return;
     if (!await torrent.prefetchAudiobookMagnet(magnet)) return;
 
-    for (final ch in chapters) {
-      final idx = ch.torrentFileIndex;
-      if (idx == null) continue;
-      await torrent.prefetchAudiobookChapter(
-        magnet,
-        idx,
-        fileNameHint: ch.title,
-      );
-      break;
-    }
+    if (chapters.isEmpty) return;
+    final idx = warmChapterIndex.clamp(0, chapters.length - 1);
+    final ch = chapters[idx];
+    final fileIdx = ch.torrentFileIndex;
+    if (fileIdx == null) return;
+    await torrent.prefetchAudiobookChapter(
+      magnet,
+      fileIdx,
+      fileNameHint: ch.title,
+    );
   }
 
   Future<List<Audiobook>> _searchTokybook(String query) async {

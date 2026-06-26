@@ -355,7 +355,10 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
       builder: (context) => const Center(child: CircularProgressIndicator(color: AppTheme.primaryColor)),
     );
 
-    final prepared = await _service.prepareAudiobookPlayback(book);
+    final prepared = await _service.prepareAudiobookPlayback(
+      book,
+      warmChapterIndex: initialChapter,
+    );
     final playbackBook = prepared.book;
     final chapters = prepared.chapters;
 

@@ -181,22 +181,19 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
     });
 
     try {
-      if (needsMagnet) {
+      if (needsMagnet && magnet != null) {
         if (!await TorrentStreamService().start()) {
           throw Exception('Torrent engine failed to start');
         }
-        final first = ch.firstWhere(
-          (c) => c.torrentFileIndex != null,
-          orElse: () => ch.first,
-        );
-        final idx = first.torrentFileIndex;
-        if (idx != null && magnet != null) {
-          unawaited(
-            TorrentStreamService().prefetchAudiobookChapter(
-              magnet,
-              idx,
-              fileNameHint: first.title,
-            ),
+        final playIdx =
+            widget.initialChapterIndex.clamp(0, ch.length - 1);
+        final playChapter = ch[playIdx];
+        final fileIdx = playChapter.torrentFileIndex;
+        if (fileIdx != null) {
+          await TorrentStreamService().prefetchAudiobookChapter(
+            magnet,
+            fileIdx,
+            fileNameHint: playChapter.title,
           );
         }
       }
@@ -592,9 +589,14 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
                   return ValueListenableBuilder<bool>(
                     valueListenable: _service.isPreparingPlayback,
                     builder: (context, preparing, _) {
-                      final hasDuration = dur > Duration.zero;
+                      return ValueListenableBuilder<bool>(
+                        valueListenable: _service.isBuffering,
+                        builder: (context, buffering, _) {
+                          final hasDuration = dur > Duration.zero;
+                          final showLoading =
+                              preparing || (buffering && !hasDuration);
                       final displayPos =
-                          (preparing && pos <= Duration.zero)
+                          (showLoading && pos <= Duration.zero)
                               ? Duration.zero
                               : pos;
                       final dValue =
@@ -618,7 +620,7 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
                             child: Slider(
                               value: safePValue,
                               max: dValue,
-                              onChanged: (preparing || !hasDuration)
+                              onChanged: (showLoading || !hasDuration)
                                   ? null
                                   : (v) => unawaited(
                                       _service.seekTo(
@@ -640,7 +642,7 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
                                 Text(
                                   hasDuration
                                       ? _formatDuration(dur)
-                                      : (preparing ? '…' : '--:--'),
+                                      : (showLoading ? 'Buffering…' : '--:--'),
                                   style: const TextStyle(
                                       color: Colors.white38, fontSize: 12),
                                 ),
@@ -648,6 +650,8 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
                             ),
                           ),
                         ],
+                      );
+                        },
                       );
                     },
                   );
@@ -696,34 +700,48 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
             ValueListenableBuilder<bool>(
               valueListenable: _service.isPreparingPlayback,
               builder: (context, preparing, _) {
-                if (preparing) {
-                  return const SizedBox(
-                    width: 80,
-                    height: 80,
-                    child: Padding(
-                      padding: EdgeInsets.all(20),
-                      child: CircularProgressIndicator(color: Colors.white),
-                    ),
-                  );
-                }
                 return ValueListenableBuilder<bool>(
-                  valueListenable: _service.isPlaying,
-                  builder: (context, playing, _) {
-                    return TvGestureTap(
-                      onTap: () => _service.playOrPause(),
-                      child: Container(
-                        width: 84,
-                        height: 84,
-                        decoration: const BoxDecoration(
-                            color: Colors.white, shape: BoxShape.circle),
-                        child: Icon(
-                          playing
-                              ? Icons.pause_rounded
-                              : Icons.play_arrow_rounded,
-                          color: Colors.black,
-                          size: 54,
-                        ),
-                      ),
+                  valueListenable: _service.isBuffering,
+                  builder: (context, buffering, _) {
+                    return ValueListenableBuilder<Duration>(
+                      valueListenable: _service.duration,
+                      builder: (context, dur, _) {
+                        final showLoading =
+                            preparing || (buffering && dur <= Duration.zero);
+                        if (showLoading) {
+                          return const SizedBox(
+                            width: 80,
+                            height: 80,
+                            child: Padding(
+                              padding: EdgeInsets.all(20),
+                              child: CircularProgressIndicator(
+                                  color: Colors.white),
+                            ),
+                          );
+                        }
+                        return ValueListenableBuilder<bool>(
+                          valueListenable: _service.isPlaying,
+                          builder: (context, playing, _) {
+                            return TvGestureTap(
+                              onTap: () => _service.playOrPause(),
+                              child: Container(
+                                width: 84,
+                                height: 84,
+                                decoration: const BoxDecoration(
+                                    color: Colors.white,
+                                    shape: BoxShape.circle),
+                                child: Icon(
+                                  playing
+                                      ? Icons.pause_rounded
+                                      : Icons.play_arrow_rounded,
+                                  color: Colors.black,
+                                  size: 54,
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
                     );
                   },
                 );

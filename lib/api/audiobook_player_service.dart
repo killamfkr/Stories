@@ -373,31 +373,50 @@ class AudiobookPlayerService {
     }
     await _player.play();
   }
-  Future<void> _waitForPlaybackClock({
-    Duration timeout = const Duration(seconds: 5),
-    Duration minPrepare = const Duration(milliseconds: 200),
+  Future<void> _waitUntilPlaybackReady({
+    Audiobook? book,
+    AudiobookChapter? chapter,
+    Duration timeout = const Duration(seconds: 45),
   }) async {
-    final deadline = DateTime.now().add(timeout);
-    final minDone = DateTime.now().add(minPrepare);
+    final torrent = book != null &&
+        chapter != null &&
+        _isTorrentChapter(book, chapter);
+    final deadline = DateTime.now().add(
+      torrent ? timeout : const Duration(seconds: 12),
+    );
+
     while (DateTime.now().isBefore(deadline)) {
       final st = _player.state;
       if (st.duration > Duration.zero) {
         duration.value = st.duration;
       }
-      if (st.position > Duration.zero && _acceptPlayerPosition(st.position)) {
-        position.value = st.position;
-        _wallClockBase = st.position;
-        _raisePositionFloor(st.position);
-        return;
+
+      final pos = st.position;
+      if (pos > Duration.zero && _acceptPlayerPosition(pos)) {
+        position.value = pos;
+        _wallClockBase = pos;
+        _raisePositionFloor(pos);
+        if (!st.buffering) return;
       }
-      if (st.duration > Duration.zero && DateTime.now().isAfter(minDone)) {
-        return;
+
+      if (torrent) {
+        if (st.duration > Duration.zero &&
+            st.buffer >= const Duration(seconds: 1) &&
+            !st.buffering) {
+          return;
+        }
+        if (st.duration > Duration.zero && st.playing && !st.buffering) {
+          return;
+        }
+      } else {
+        if (st.duration > Duration.zero && !st.buffering) return;
+        if (st.playing && !st.buffering && st.duration > Duration.zero) return;
       }
-      if (st.playing && DateTime.now().isAfter(minDone)) {
-        return;
-      }
-      await Future.delayed(const Duration(milliseconds: 60));
+
+      await Future.delayed(const Duration(milliseconds: 80));
     }
+
+    debugPrint('AudiobookPlayerService: playback ready wait timed out');
   }
 
   /// After play() on a stream, wait until duration/position is available before seeking.
@@ -495,7 +514,7 @@ class AudiobookPlayerService {
     await p.setProperty('cache', 'yes');
     await p.setProperty('demuxer-max-bytes', '50000000');
     await p.setProperty('demuxer-max-back-bytes', '50000000');
-    await p.setProperty('demuxer-readahead-secs', torrentBacked ? '4' : '30');
+    await p.setProperty('demuxer-readahead-secs', torrentBacked ? '8' : '30');
     if (torrentBacked) {
       await p.setProperty('force-seekable', 'yes');
       try {
@@ -714,14 +733,13 @@ class AudiobookPlayerService {
       );
       final torrentResume = _isTorrentChapter(book, chapters[idx]);
       if (torrentResume) {
-        // Prime the loopback stream, seek while paused, then start audible playback.
         await _player.play();
         await _waitForStreamPrime(
-          minWait: const Duration(milliseconds: 350),
-          timeout: const Duration(seconds: 12),
+          minWait: const Duration(milliseconds: 200),
+          timeout: const Duration(seconds: 10),
         );
         await _player.pause();
-        await Future.delayed(const Duration(milliseconds: 300));
+        await Future.delayed(const Duration(milliseconds: 150));
         await _waitForResumeReady(book, chapters[idx]);
         await _settleResumePosition(resumePosition!);
         await _playThroughHandler();
@@ -741,7 +759,10 @@ class AudiobookPlayerService {
       await _playThroughHandler();
     }
 
-    await _waitForPlaybackClock();
+    await _waitUntilPlaybackReady(
+      book: book,
+      chapter: chapters[idx],
+    );
     _isResuming = false;
     await _applyPlaybackRate(force: true);
     _finishPreparingPlayback(positionHint: preparingPositionHint);
@@ -917,7 +938,11 @@ class AudiobookPlayerService {
       final media = await _mediaForChapter(book, _currentChapters[index]);
       await _player.open(media, play: false);
       await _playThroughHandler();
-      await _waitForPlaybackClock(timeout: const Duration(seconds: 4));
+      await _waitUntilPlaybackReady(
+        book: book,
+        chapter: _currentChapters[index],
+        timeout: const Duration(seconds: 30),
+      );
       await _applyPlaybackRate(force: true);
       _finishPreparingPlayback();
       unawaited(
