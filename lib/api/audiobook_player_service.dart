@@ -554,6 +554,36 @@ class AudiobookPlayerService {
     }
   }
 
+  void _publishLoadingState() {
+    if (_handler == null || currentBook.value == null) return;
+    _syncChapterQueue();
+    _syncMediaItem();
+    _handler!.updateState(PlaybackState(
+      controls: const [
+        MediaControl.skipToPrevious,
+        MediaControl.play,
+        MediaControl.stop,
+        MediaControl.skipToNext,
+      ],
+      systemActions: const {
+        MediaAction.seek,
+        MediaAction.seekForward,
+        MediaAction.seekBackward,
+        MediaAction.playPause,
+        MediaAction.stop,
+        MediaAction.skipToNext,
+        MediaAction.skipToPrevious,
+      },
+      androidCompactActionIndices: const [0, 1, 3],
+      processingState: AudioProcessingState.loading,
+      playing: false,
+      updatePosition: position.value,
+      bufferedPosition: Duration.zero,
+      speed: 1.0,
+      queueIndex: currentChapterIndex.value,
+    ));
+  }
+
   void _syncMediaItem() {
     final handler = _handler;
     final item = _buildCurrentMediaItem();
@@ -638,7 +668,7 @@ class AudiobookPlayerService {
 
     _handler?.setPlayerType(AudioPlayerType.audiobook, _player);
 
-    _syncChapterQueue();
+    _publishLoadingState();
 
     // Optimize for streaming audiobooks (once per player).
     final torrentBacked = book.source == 'magnet' || book.source == 'audiobookbay';
@@ -758,6 +788,15 @@ class AudiobookPlayerService {
       final st = _player.state;
       isPlaying.value = st.playing;
       isBuffering.value = st.buffering;
+    }
+    final handler = _handler;
+    if (handler != null) {
+      if (_player.state.playing || isPlaying.value) {
+        unawaited(handler.pause());
+      } else {
+        unawaited(handler.play());
+      }
+      return;
     }
     _player.playOrPause();
   }

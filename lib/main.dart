@@ -28,7 +28,11 @@ Future<void> main() async {
 
   await _configureAudioSession();
   if (platformIsAndroid) {
-    await Permission.notification.request();
+    final notificationStatus = await Permission.notification.request();
+    if (!notificationStatus.isGranted) {
+      audiobookAudioInitWarning =
+          'Enable notifications for Stories to show playback controls in the shade.';
+    }
     await AndroidBackgroundPolicyService.instance.ensureBatteryOnStartup();
   }
 
@@ -40,11 +44,13 @@ Future<void> main() async {
         androidNotificationChannelName: 'Stories playback',
         androidNotificationChannelDescription:
             'Playback controls and now playing for Stories',
-        androidNotificationIcon: 'mipmap/ic_launcher',
+        androidNotificationIcon: 'drawable/ic_stat_stories',
         androidNotificationClickStartsActivity: true,
         androidNotificationOngoing: true,
         androidStopForegroundOnPause: false,
         androidResumeOnClick: true,
+        androidShowNotificationBadge: false,
+        notificationColor: AppTheme.bgCard,
         preloadArtwork: true,
         fastForwardInterval: const Duration(seconds: 30),
         rewindInterval: const Duration(seconds: 15),
@@ -55,8 +61,11 @@ Future<void> main() async {
     debugPrint('[Stories] AudioService ready');
   } catch (e, st) {
     debugPrint('[Stories] AudioService failed: $e\n$st');
-    audiobookAudioInitWarning =
+    final extra =
         'Lock-screen notification unavailable ($e). Rebuild after running tool/patch_android.sh.';
+    audiobookAudioInitWarning = audiobookAudioInitWarning == null
+        ? extra
+        : '${audiobookAudioInitWarning!} $extra';
   }
 
   runApp(const StoriesApp());

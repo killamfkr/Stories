@@ -1,7 +1,7 @@
 name: audiobook_app
 description: Stories — audiobook player (Audiobook Bay, search, player, downloads).
 publish_to: 'none'
-version: 1.0.0+5
+version: 1.0.0+6
 
 environment:
   sdk: ^3.11.0

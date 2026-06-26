@@ -108,8 +108,25 @@ if [[ -f "$SRC_FILE_PATHS" ]]; then
   echo "Installed FileProvider file_paths.xml"
 fi
 
+SRC_DRAWABLE_DIR="$ROOT/tool/android/res/drawable"
+DEST_DRAWABLE_DIR="$ROOT/android/app/src/main/res/drawable"
+if [[ -d "$SRC_DRAWABLE_DIR" ]]; then
+  mkdir -p "$DEST_DRAWABLE_DIR"
+  cp -r "$SRC_DRAWABLE_DIR/." "$DEST_DRAWABLE_DIR/"
+  echo "Installed notification drawable resources"
+fi
+
+SRC_RAW_DIR="$ROOT/tool/android/res/raw"
+DEST_RAW_DIR="$ROOT/android/app/src/main/res/raw"
+if [[ -d "$SRC_RAW_DIR" ]]; then
+  mkdir -p "$DEST_RAW_DIR"
+  cp -r "$SRC_RAW_DIR/." "$DEST_RAW_DIR/"
+  echo "Installed notification keep.xml"
+fi
+
 bash "$ROOT/tool/configure_android_release_signing.sh"
 bash "$ROOT/tool/configure_android_sdk_versions.sh"
 bash "$ROOT/tool/configure_android_packaging.sh"
+bash "$ROOT/tool/configure_android_notification_resources.sh"
 
 echo "Patched AndroidManifest.xml for audiobook app"
