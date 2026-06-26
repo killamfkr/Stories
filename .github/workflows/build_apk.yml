@@ -27,15 +27,39 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Install Android SDK platform 36
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36"
-
       - name: Generate Android project
         run: |
           flutter create . --project-name audiobook_app --org com.playtorrio.audiobook
           bash tool/patch_android.sh
+
+      - name: Install Android SDK platform 36
+        run: |
+          set -euo pipefail
+          yes | flutter doctor --android-licenses >/dev/null 2>&1 || true
+
+          SDK_DIR=""
+          if [[ -f android/local.properties ]]; then
+            SDK_DIR="$(grep '^sdk.dir=' android/local.properties | cut -d= -f2- | tr -d '\r')"
+          fi
+
+          SDKMANAGER=""
+          for candidate in \
+            "${SDK_DIR}/cmdline-tools/latest/bin/sdkmanager" \
+            "${ANDROID_SDK_ROOT:-}/cmdline-tools/latest/bin/sdkmanager" \
+            "${ANDROID_HOME:-}/cmdline-tools/latest/bin/sdkmanager" \
+            "/usr/local/lib/android/sdk/cmdline-tools/latest/bin/sdkmanager"; do
+            if [[ -n "$candidate" && -x "$candidate" ]]; then
+              SDKMANAGER="$candidate"
+              break
+            fi
+          done
+
+          if [[ -z "$SDKMANAGER" ]]; then
+            echo "sdkmanager not found; Gradle will download platform 36 if needed"
+            exit 0
+          fi
+
+          "$SDKMANAGER" "platforms;android-36"
 
       - name: Install dependencies
         run: flutter pub get
