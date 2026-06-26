@@ -20,6 +20,7 @@ Stories helps you find, listen to, and organize audiobooks without a subscriptio
 - Continue listening remembers chapter and position per title
 - Playback speed, autoplay next chapter, skip forward/back
 - Lock-screen and notification controls on Android (after `tool/patch_android.sh`)
+- **Android Auto** — playback controls and continue listening in the car (media app)
 
 ### Your library
 

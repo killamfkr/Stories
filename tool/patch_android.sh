@@ -32,6 +32,7 @@ else
         android:label="Stories"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:appCategory="audio"
         android:usesCleartextTraffic="true"
         android:extractNativeLibs="true"
         android:largeHeap="true">
@@ -75,6 +76,10 @@ else
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
     </application>
 </manifest>
 EOF
@@ -85,6 +90,14 @@ if [[ -f "$SRC_ACTIVITY" ]]; then
   mkdir -p "$(dirname "$DEST_ACTIVITY")"
   cp "$SRC_ACTIVITY" "$DEST_ACTIVITY"
   echo "Patched MainActivity.kt (extends AudioServiceActivity)"
+fi
+
+SRC_AUTO_XML="$ROOT/tool/android/res/xml/automotive_app_desc.xml"
+DEST_AUTO_XML="$ROOT/android/app/src/main/res/xml/automotive_app_desc.xml"
+if [[ -f "$SRC_AUTO_XML" ]]; then
+  mkdir -p "$(dirname "$DEST_AUTO_XML")"
+  cp "$SRC_AUTO_XML" "$DEST_AUTO_XML"
+  echo "Installed Android Auto automotive_app_desc.xml"
 fi
 
 bash "$ROOT/tool/configure_android_release_signing.sh"
