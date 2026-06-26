@@ -15,6 +15,7 @@ import 'api/torrent_stream_service.dart';
 import 'platform_flags.dart';
 import 'screens/audiobook_screen.dart';
 import 'services/playtorrio_cloud_sync_service.dart';
+import 'services/android_background_policy_service.dart';
 import 'utils/app_theme.dart';
 
 /// Set when [AudioService.init] fails in [main]; shown once on the home screen.
@@ -28,6 +29,7 @@ Future<void> main() async {
   await _configureAudioSession();
   if (platformIsAndroid) {
     await Permission.notification.request();
+    await AndroidBackgroundPolicyService.instance.ensureBatteryOnStartup();
   }
 
   try {

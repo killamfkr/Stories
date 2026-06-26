@@ -17,6 +17,7 @@ import 'audiobook_downloads_screen.dart';
 import 'generate_audiobook_screen.dart';
 import '../widgets/tv_interactive.dart';
 import '../widgets/app_update_prompt.dart';
+import '../widgets/background_policy_prompt.dart';
 import '../services/app_update_service.dart';
 import 'audiobook_magnet_screen.dart';
 import 'settings_screen.dart';
@@ -83,6 +84,7 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
     if (platformIsAndroid) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_maybeOfferAppUpdate());
+        unawaited(showUnrestrictedDataReminder(context));
       });
     }
   }

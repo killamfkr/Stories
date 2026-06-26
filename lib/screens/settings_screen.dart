@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../api/settings_service.dart';
 import '../platform_flags.dart';
 import '../services/app_update_service.dart';
+import '../services/android_background_policy_service.dart';
 import '../services/playtorrio_cloud_sync_service.dart';
 import '../utils/app_theme.dart';
 import '../widgets/app_update_prompt.dart';
@@ -34,6 +35,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _torrentRamCacheMb = 200;
   String _appVersionLabel = '';
   bool _updateChecking = false;
+  bool _batteryUnrestricted = true;
+  bool _backgroundPolicyLoading = false;
 
   @override
   void initState() {
@@ -62,6 +65,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final pkg = await AppUpdateService.instance.currentPackageInfo();
         versionLabel = '${pkg.version} (${pkg.buildNumber})';
       }
+      final batteryOk = platformIsAndroid
+          ? await AndroidBackgroundPolicyService.instance
+              .isBatteryUnrestricted()
+          : true;
       if (!mounted) return;
       setState(() {
         _sessionPresent = session;
@@ -72,6 +79,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _torrentCacheType = cacheType;
         _torrentRamCacheMb = cacheMb;
         _appVersionLabel = versionLabel;
+        _batteryUnrestricted = batteryOk;
       });
     } catch (e) {
       debugPrint('SettingsScreen load failed: $e');
@@ -330,6 +338,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _requestBatteryUnrestricted() async {
+    if (!platformIsAndroid) return;
+    setState(() => _backgroundPolicyLoading = true);
+    try {
+      final ok =
+          await AndroidBackgroundPolicyService.instance.requestBatteryUnrestricted();
+      if (!mounted) return;
+      setState(() => _batteryUnrestricted = ok);
+      _snack(
+        ok
+            ? 'Battery optimization disabled for Stories'
+            : 'Allow Stories in battery settings for uninterrupted playback',
+      );
+    } finally {
+      if (mounted) setState(() => _backgroundPolicyLoading = false);
+    }
+  }
+
+  Future<void> _openUnrestrictedDataSettings() async {
+    if (!platformIsAndroid) return;
+    await AndroidBackgroundPolicyService.instance.openUnrestrictedDataSettings();
+    await AndroidBackgroundPolicyService.instance.markDataReminderShown();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -516,6 +548,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
+                if (platformIsAndroid)
+                  _sectionCard(
+                    title: 'Background',
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                      child: Column(
+                        children: [
+                          ListTile(
+                            leading: Icon(
+                              _batteryUnrestricted
+                                  ? Icons.battery_charging_full
+                                  : Icons.battery_alert_outlined,
+                              color: _batteryUnrestricted
+                                  ? AppTheme.primaryColor
+                                  : Colors.orangeAccent,
+                            ),
+                            title: const Text('Battery optimization'),
+                            subtitle: Text(
+                              _batteryUnrestricted
+                                  ? 'Stories can run in the background'
+                                  : 'Restricted — playback may stop when the screen is off',
+                            ),
+                            trailing: _batteryUnrestricted
+                                ? const Icon(
+                                    Icons.check_circle_outline,
+                                    color: AppTheme.primaryColor,
+                                  )
+                                : _backgroundPolicyLoading
+                                    ? const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : FilledButton(
+                                        onPressed: _requestBatteryUnrestricted,
+                                        child: const Text('Allow'),
+                                      ),
+                            onTap: _batteryUnrestricted
+                                ? null
+                                : (_backgroundPolicyLoading
+                                    ? null
+                                    : _requestBatteryUnrestricted),
+                          ),
+                          ListTile(
+                            leading: const Icon(Icons.signal_cellular_alt),
+                            title: const Text('Mobile data'),
+                            subtitle: const Text(
+                              'Set to Unrestricted so torrent streaming continues on mobile data',
+                            ),
+                            trailing: const Icon(Icons.open_in_new),
+                            onTap: _openUnrestrictedDataSettings,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 _sectionCard(
                   title: 'About',
                   child: Column(
