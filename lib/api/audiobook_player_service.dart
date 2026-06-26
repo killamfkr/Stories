@@ -371,8 +371,8 @@ class AudiobookPlayerService {
       );
     }
 
-    _isResuming =
-        resumePosition != null && resumePosition > Duration.zero;
+    _isResuming = initialChapter > 0 ||
+        (resumePosition != null && resumePosition > Duration.zero);
     _resetPlaybackUiState();
     _wallClockBase =
         _isResuming && resumePosition != null ? resumePosition : Duration.zero;
@@ -724,8 +724,7 @@ class AudiobookPlayerService {
         prepared.book,
         prepared.chapters,
         initialChapter: chapterIndex,
-        resumePosition:
-            positionMs > 0 ? Duration(milliseconds: positionMs) : null,
+        resumePosition: Duration(milliseconds: positionMs),
       );
       return;
     }
@@ -828,6 +827,14 @@ class AudiobookPlayerService {
 
   // --- Bookmarks (synced via SettingsService → cloud when logged in) ---
 
+  Future<void> _touchBookmarksRevision() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      AudiobookPrefsKeys.bookmarksUpdatedAt,
+      DateTime.now().millisecondsSinceEpoch,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> getBookmarks() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getStringList(AudiobookPrefsKeys.bookmarks) ?? [];
@@ -876,6 +883,7 @@ class AudiobookPlayerService {
       return false;
     });
     await prefs.setStringList(AudiobookPrefsKeys.bookmarks, strings);
+    await _touchBookmarksRevision();
     PlaytorrioCloudSyncService.instance.scheduleSettingsPush();
     SettingsService.notifyAudiobookPrefsChanged();
   }
@@ -908,6 +916,7 @@ class AudiobookPlayerService {
       }),
     );
     await prefs.setStringList(AudiobookPrefsKeys.bookmarks, strings);
+    await _touchBookmarksRevision();
     PlaytorrioCloudSyncService.instance.scheduleSettingsPush();
     SettingsService.notifyAudiobookPrefsChanged();
   }
