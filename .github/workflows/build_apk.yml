@@ -27,6 +27,11 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install Android SDK platform 36
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36"
+
       - name: Generate Android project
         run: |
           flutter create . --project-name audiobook_app --org com.playtorrio.audiobook

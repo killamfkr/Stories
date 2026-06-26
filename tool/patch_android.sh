@@ -101,5 +101,6 @@ if [[ -f "$SRC_AUTO_XML" ]]; then
 fi
 
 bash "$ROOT/tool/configure_android_release_signing.sh"
+bash "$ROOT/tool/configure_android_sdk_versions.sh"
 
 echo "Patched AndroidManifest.xml for audiobook app"
