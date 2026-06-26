@@ -156,6 +156,7 @@ class SettingsService {
 
   static const _torrentCacheTypeKey = 'torrent_cache_type';
   static const _torrentRamCacheMbKey = 'torrent_ram_cache_mb';
+  static const _playbackSpeedKey = 'audiobook_playback_speed';
   static const _ptCloudSettingsSyncKey = 'pt_cloud_sync_settings';
   static const _userAvatarKey = 'stories_user_avatar';
 
@@ -198,6 +199,16 @@ class SettingsService {
     await prefs.setInt(_torrentRamCacheMbKey, mb);
   }
 
+  Future<double> getPlaybackSpeed() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_playbackSpeedKey) ?? 1.0;
+  }
+
+  Future<void> setPlaybackSpeed(double speed) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_playbackSpeedKey, speed);
+  }
+
   Future<int> getUserAvatarIndex() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(_userAvatarKey) ?? 0;
@@ -223,6 +234,7 @@ class SettingsService {
           prefs.getInt(AudiobookPrefsKeys.bookmarksUpdatedAt) ?? 0,
       _torrentCacheTypeKey: await getTorrentCacheType(),
       _torrentRamCacheMbKey: await getTorrentRamCacheMb(),
+      _playbackSpeedKey: await getPlaybackSpeed(),
       _userAvatarKey: await getUserAvatarIndex(),
     };
   }
@@ -288,6 +300,11 @@ class SettingsService {
       if (k == _torrentRamCacheMbKey) {
         final n = v is int ? v : int.tryParse(v.toString());
         if (n != null) await setTorrentRamCacheMb(n);
+        continue;
+      }
+      if (k == _playbackSpeedKey) {
+        final n = v is num ? v.toDouble() : double.tryParse(v.toString());
+        if (n != null) await setPlaybackSpeed(n);
         continue;
       }
       if (k == _userAvatarKey) {

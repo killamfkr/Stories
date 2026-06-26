@@ -39,11 +39,13 @@ class AudiobookPlayerService {
   /// True while a chapter is opening/buffering — UI should show loading, not pause.
   final ValueNotifier<bool> isPreparingPlayback = ValueNotifier<bool>(false);
   final ValueNotifier<bool> autoplay = ValueNotifier<bool>(true);
+  final ValueNotifier<double> playbackRate = ValueNotifier<double>(1.0);
   
   List<AudiobookChapter> _currentChapters = [];
   final List<StreamSubscription> _subscriptions = [];
   bool _playerListenersAttached = false;
   bool _mpvAudiobookTuned = false;
+  bool _playbackRateLoaded = false;
   Timer? _progressTicker;
   bool _isResuming = false;
   Timer? _progressSaveDebounce;
@@ -734,6 +736,7 @@ class AudiobookPlayerService {
 
     await _waitForPlaybackClock();
     _isResuming = false;
+    await _applyPlaybackRate();
     _finishPreparingPlayback(positionHint: preparingPositionHint);
   }
 
@@ -800,8 +803,53 @@ class AudiobookPlayerService {
     }
     _player.playOrPause();
   }
-  void seek(Duration p) => _player.seek(p);
-  void setRate(double r) => _player.setRate(r);
+  void seek(Duration p) => unawaited(seekTo(p));
+
+  Future<void> ensurePlaybackRateLoaded() async {
+    if (_playbackRateLoaded) return;
+    _playbackRateLoaded = true;
+    final speed = await SettingsService().getPlaybackSpeed();
+    playbackRate.value = speed;
+    await _player.setRate(speed);
+  }
+
+  Future<void> setRate(double r) async {
+    final speed = r.clamp(0.5, 3.0);
+    playbackRate.value = speed;
+    await _player.setRate(speed);
+    await SettingsService().setPlaybackSpeed(speed);
+    _updateSystemState();
+  }
+
+  Future<void> _applyPlaybackRate() async {
+    await ensurePlaybackRateLoaded();
+    final speed = playbackRate.value;
+    if ((_player.state.rate - speed).abs() > 0.01) {
+      await _player.setRate(speed);
+    }
+  }
+
+  Future<void> seekTo(Duration target) async {
+    var resolved = target;
+    if (resolved.isNegative) resolved = Duration.zero;
+    final d = duration.value;
+    if (d > Duration.zero && resolved > d) resolved = d;
+
+    _positionFloorMs = resolved.inMilliseconds;
+    _resumeTargetPosition = null;
+    _lastCorrectiveSeekAt = null;
+    _wallClockBase = resolved;
+    position.value = resolved;
+    if (isPlaying.value) {
+      _markWallClock(base: resolved);
+    } else {
+      _resetWallClock(base: resolved);
+    }
+
+    await _player.seek(resolved);
+    _updateSystemState();
+    _scheduleDebouncedProgressSave();
+  }
 
   void skipToNextChapter() {
     final nextIdx = currentChapterIndex.value + 1;
@@ -847,6 +895,7 @@ class AudiobookPlayerService {
       await _player.open(media, play: false);
       await _playThroughHandler();
       await _waitForPlaybackClock(timeout: const Duration(seconds: 4));
+      await _applyPlaybackRate();
       _finishPreparingPlayback();
     } catch (e, st) {
       isPreparingPlayback.value = false;

@@ -90,8 +90,7 @@ class PlayTorrioAudioHandler extends BaseAudioHandler
     if (_currentType == AudioPlayerType.music) {
       await _musicPlayer.seek(position);
     } else {
-      await (_activePlayer as mk.Player).seek(position);
-      AudiobookPlayerService().publishNowPlaying();
+      await AudiobookPlayerService().seekTo(position);
     }
   }
 

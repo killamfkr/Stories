@@ -137,8 +137,15 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
   @override
   void initState() {
     super.initState();
+    unawaited(_loadPlaybackSpeed());
     unawaited(_refreshBookmarkFlag());
     _bootstrapPlayback();
+  }
+
+  Future<void> _loadPlaybackSpeed() async {
+    await _service.ensurePlaybackRateLoaded();
+    if (!mounted) return;
+    setState(() => _playbackSpeed = _service.playbackRate.value);
   }
 
   Future<void> _refreshBookmarkFlag() async {
@@ -492,7 +499,7 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
       initialValue: _playbackSpeed,
       onSelected: (double speed) {
         setState(() => _playbackSpeed = speed);
-        _service.setRate(speed);
+        unawaited(_service.setRate(speed));
       },
       itemBuilder: (context) => [0.5, 1.0, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0].map((s) => PopupMenuItem(value: s, child: Text('${s}x Speed'))).toList(),
       color: const Color(0xFF1A0B2E),
@@ -595,8 +602,11 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
                               max: dValue,
                               onChanged: (preparing || !hasDuration)
                                   ? null
-                                  : (v) => _service.seek(
-                                      Duration(milliseconds: v.toInt())),
+                                  : (v) => unawaited(
+                                      _service.seekTo(
+                                        Duration(milliseconds: v.toInt()),
+                                      ),
+                                    ),
                             ),
                           ),
                           Padding(
