@@ -38,19 +38,30 @@ if not root_gradle.exists():
     raise SystemExit(f"error: missing {root_gradle}")
 
 root_text = root_gradle.read_text()
-if marker not in root_text:
-    block = f"""
+root_text = re.sub(
+    rf"\n// {re.escape(marker)}\n.*?(?=\n(?:subprojects|tasks\.register|\Z))",
+    "\n",
+    root_text,
+    flags=re.DOTALL,
+)
+
+block = f"""
 // {marker}
 subprojects {{
-    afterEvaluate {{
-        extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)?.apply {{
+    pluginManager.withPlugin("com.android.library") {{
+        extensions.configure<com.android.build.gradle.LibraryExtension> {{
             compileSdk = {compile_sdk}
         }}
     }}
 }}
 """
-    root_gradle.write_text(root_text.rstrip() + "\n" + block)
-    print(f"Configured plugin compileSdk {compile_sdk} in android/build.gradle.kts")
-else:
-    print(f"Plugin compileSdk already configured in android/build.gradle.kts")
+
+needle = "subprojects {\n    project.evaluationDependsOn(\":app\")"
+if needle in root_text:
+    root_text = root_text.replace(needle, block + "\n" + needle, 1)
+elif marker not in root_text:
+    root_text = root_text.rstrip() + "\n" + block
+
+root_gradle.write_text(root_text)
+print(f"Configured plugin compileSdk {compile_sdk} in android/build.gradle.kts")
 PY
