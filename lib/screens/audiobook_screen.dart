@@ -247,8 +247,10 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
         ? pmRaw
         : (pmRaw is num ? pmRaw.toInt() : int.tryParse('$pmRaw') ?? 0);
 
+    final isPlaceholder = progress['placeholderBookmark'] == true;
+
     // Grid "title only" bookmarks merge Continue Listening when present.
-    if (progress['placeholderBookmark'] == true) {
+    if (isPlaceholder) {
       final hist = await _playerService.getHistory();
       for (final h in hist) {
         final b = h['book'];
@@ -266,12 +268,47 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
       }
     }
 
+    final hasSavedPlace = chapterIndex > 0 || positionMs > 0;
+
     _openAudiobook(
       book,
       initialChapter: chapterIndex,
-      initialPosition:
-          positionMs > 0 ? Duration(milliseconds: positionMs) : null,
+      initialPosition: hasSavedPlace
+          ? Duration(milliseconds: positionMs)
+          : null,
     );
+  }
+
+  String _formatPlaybackOffset(int positionMs) {
+    final totalSeconds = (positionMs / 1000).floor();
+    final hours = totalSeconds ~/ 3600;
+    final minutes = (totalSeconds % 3600) ~/ 60;
+    final seconds = totalSeconds % 60;
+    if (hours > 0) {
+      return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+    return '$minutes:${seconds.toString().padLeft(2, '0')}';
+  }
+
+  String _bookmarkResumeLabel(Map<String, dynamic> entry) {
+    final isPlaceholder = entry['placeholderBookmark'] == true;
+    final ciRaw = entry['chapterIndex'];
+    final chapterIndex = ciRaw is int
+        ? ciRaw
+        : (ciRaw is num ? ciRaw.toInt() : int.tryParse('$ciRaw') ?? 0);
+    final pmRaw = entry['positionMs'];
+    final positionMs = pmRaw is int
+        ? pmRaw
+        : (pmRaw is num ? pmRaw.toInt() : int.tryParse('$pmRaw') ?? 0);
+
+    if (isPlaceholder && chapterIndex == 0 && positionMs == 0) {
+      return 'Tap to open';
+    }
+    final chapterLabel = 'Chapter ${chapterIndex + 1}';
+    if (positionMs > 0) {
+      return '$chapterLabel · ${_formatPlaybackOffset(positionMs)}';
+    }
+    return chapterLabel;
   }
 
   void _removeFromHistory(String audioBookId) async {
@@ -615,6 +652,37 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
     );
   }
 
+  Widget _buildBookmarkGrid() {
+    final screenWidth = MediaQuery.of(context).size.width;
+    int crossAxisCount = 2;
+    if (screenWidth > 1200) {
+      crossAxisCount = 6;
+    } else if (screenWidth > 900) {
+      crossAxisCount = 4;
+    } else if (screenWidth > 600) {
+      crossAxisCount = 3;
+    }
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(24, 16, 24, 150),
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        childAspectRatio: 0.68,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: _bookmarks.length,
+      itemBuilder: (context, index) {
+        final entry = _bookmarks[index];
+        final rawBook = entry['book'];
+        if (rawBook is! Map) return const SizedBox.shrink();
+        final book = Audiobook.fromJson(Map<String, dynamic>.from(rawBook));
+        return _buildBookCard(book, bookmarkResume: entry);
+      },
+    );
+  }
+
   Widget _buildBody() {
     if (_shelf == _AudiobookShelf.bookmarks) {
       if (_bookmarks.isEmpty) {
@@ -622,41 +690,29 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
           padding: const EdgeInsets.only(top: 100),
           child: Center(
             child: Text(
-              'No bookmarks yet\nOpen a title and tap the bookmark icon to save your place (syncs when logged in).',
+              'No bookmarks yet\nOpen a title and tap the bookmark icon while listening to save your place (syncs when logged in).',
               textAlign: TextAlign.center,
               style: const TextStyle(color: Colors.white54, height: 1.35),
             ),
           ),
         );
       }
-      final screenWidth = MediaQuery.of(context).size.width;
-      int crossAxisCount = 2;
-      if (screenWidth > 1200) {
-        crossAxisCount = 6;
-      } else if (screenWidth > 900) {
-        crossAxisCount = 4;
-      } else if (screenWidth > 600) {
-        crossAxisCount = 3;
-      }
-      return GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(24, 24, 24, 150),
-        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          childAspectRatio: 0.7,
-          crossAxisSpacing: 16,
-          mainAxisSpacing: 16,
-        ),
-        itemCount: _bookmarks.length,
-        itemBuilder: (context, index) {
-          final entry = _bookmarks[index];
-          final rawBook = entry['book'];
-          if (rawBook is! Map) return const SizedBox.shrink();
-          final book =
-              Audiobook.fromJson(Map<String, dynamic>.from(rawBook));
-          return _buildBookCard(book, bookmarkResume: entry);
-        },
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+            child: Text(
+              'Tap a title to resume at your saved place',
+              style: AppTheme.body.copyWith(
+                color: AppTheme.primaryColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          _buildBookmarkGrid(),
+        ],
       );
     }
 
@@ -711,6 +767,8 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
 
   Widget _buildBookCard(Audiobook book, {Map<String, dynamic>? bookmarkResume}) {
     final isLiked = _likedBooks.any((b) => b.audioBookId == book.audioBookId);
+    final resumeLabel =
+        bookmarkResume != null ? _bookmarkResumeLabel(bookmarkResume!) : null;
 
     return FocusableControl(
       onTap: bookmarkResume != null
@@ -726,41 +784,81 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Expanded(
-                  child: book.thumbUrl.startsWith('http://') ||
-                          book.thumbUrl.startsWith('https://')
-                      ? CachedNetworkImage(
-                          imageUrl: book.thumbUrl,
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          placeholder: (context, url) =>
-                              Container(color: Colors.white10),
-                          errorWidget: (context, url, error) =>
-                              CachedNetworkImage(
-                            imageUrl: book.coverImage,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            errorWidget: (c, u, e) => const Center(
-                                child:
-                                    Icon(Icons.book, color: Colors.white24)),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      book.thumbUrl.startsWith('http://') ||
+                              book.thumbUrl.startsWith('https://')
+                          ? CachedNetworkImage(
+                              imageUrl: book.thumbUrl,
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              placeholder: (context, url) =>
+                                  Container(color: Colors.white10),
+                              errorWidget: (context, url, error) =>
+                                  CachedNetworkImage(
+                                imageUrl: book.coverImage,
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                errorWidget: (c, u, e) => const Center(
+                                    child: Icon(Icons.book,
+                                        color: Colors.white24)),
+                              ),
+                            )
+                          : FittedBox(
+                              fit: BoxFit.cover,
+                              clipBehavior: Clip.hardEdge,
+                              child: audiobookThumb(book.thumbUrl,
+                                  width: 480, height: 720),
+                            ),
+                      if (bookmarkResume != null)
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AppTheme.primaryColor.withValues(alpha: 0.92),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.play_arrow_rounded,
+                              color: Color(0xFF1A1208),
+                              size: 22,
+                            ),
                           ),
-                        )
-                      : FittedBox(
-                          fit: BoxFit.cover,
-                          clipBehavior: Clip.hardEdge,
-                          child: audiobookThumb(book.thumbUrl,
-                              width: 480, height: 720),
                         ),
+                    ],
+                  ),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(12.0),
-                  child: Text(
-                    book.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: AppTheme.body.copyWith(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        book.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: AppTheme.body.copyWith(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      if (resumeLabel != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          resumeLabel,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppTheme.primaryColor,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
               ],
@@ -821,13 +919,9 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
                         ),
                       ],
                     )
-                  : TvGestureTap(
+                  : GestureDetector(
+                      behavior: HitTestBehavior.opaque,
                       onTap: () async {
-                        await _playerService.removeBookmark(book.audioBookId);
-                        await _reloadCloudBackedShelves();
-                        if (mounted) setState(() {});
-                      },
-                      onLongPress: () async {
                         await _playerService.removeBookmark(book.audioBookId);
                         await _reloadCloudBackedShelves();
                         if (mounted) {
@@ -842,7 +936,7 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
                       child: Container(
                         padding: const EdgeInsets.all(6),
                         decoration: const BoxDecoration(
-                          color: Colors.black45,
+                          color: Colors.black54,
                           shape: BoxShape.circle,
                         ),
                         child: const Icon(Icons.close,

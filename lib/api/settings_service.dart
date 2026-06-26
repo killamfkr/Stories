@@ -56,28 +56,43 @@ List<String> mergeAudiobookHistoryLists(List<String> local, List<String> remote)
   return out;
 }
 
-List<String> mergeAudiobookBookmarkLists(List<String> local, List<String> remote) {
+List<String> mergeAudiobookBookmarkLists(
+  List<String> local,
+  List<String> remote, {
+  int localUpdatedAt = 0,
+}) {
   if (remote.isEmpty) return List<String>.from(local);
 
-  final localById = <String, String>{};
-  for (final x in local) {
-    final id = _audiobookEntryId(x);
-    if (id.isNotEmpty) localById[id] = x;
+  var remoteMax = 0;
+  for (final x in remote) {
+    final ts = _audiobookBookmarkTs(x);
+    if (ts > remoteMax) remoteMax = ts;
   }
 
-  final out = <String>[];
-  for (final x in remote) {
+  // Local deletes and edits stay authoritative until another device writes newer data.
+  if (localUpdatedAt >= remoteMax) {
+    return List<String>.from(local);
+  }
+
+  final map = <String, String>{};
+  void ingest(String x) {
     final id = _audiobookEntryId(x);
-    if (id.isEmpty) continue;
-    final localRow = localById[id];
-    if (localRow != null &&
-        _audiobookBookmarkTs(localRow) > _audiobookBookmarkTs(x)) {
-      out.add(localRow);
-    } else {
-      out.add(x);
+    if (id.isEmpty) return;
+    final prev = map[id];
+    if (prev == null || _audiobookBookmarkTs(x) >= _audiobookBookmarkTs(prev)) {
+      map[id] = x;
     }
   }
-  out.sort((a, b) => _audiobookBookmarkTs(b).compareTo(_audiobookBookmarkTs(a)));
+
+  for (final x in remote) {
+    ingest(x);
+  }
+  for (final x in local) {
+    ingest(x);
+  }
+
+  final out = map.values.toList()
+    ..sort((a, b) => _audiobookBookmarkTs(b).compareTo(_audiobookBookmarkTs(a)));
   return out;
 }
 
@@ -170,6 +185,8 @@ class SettingsService {
           prefs.getStringList(AudiobookPrefsKeys.liked) ?? [],
       AudiobookPrefsKeys.bookmarks:
           prefs.getStringList(AudiobookPrefsKeys.bookmarks) ?? [],
+      AudiobookPrefsKeys.bookmarksUpdatedAt:
+          prefs.getInt(AudiobookPrefsKeys.bookmarksUpdatedAt) ?? 0,
       _torrentCacheTypeKey: await getTorrentCacheType(),
       _torrentRamCacheMbKey: await getTorrentRamCacheMb(),
       _userAvatarKey: await getUserAvatarIndex(),
@@ -204,11 +221,30 @@ class SettingsService {
       if (k == AudiobookPrefsKeys.bookmarks && v is List) {
         final local = prefs.getStringList(AudiobookPrefsKeys.bookmarks) ?? [];
         final remote = v.map((x) => x.toString()).toList();
-        await prefs.setStringList(
-          AudiobookPrefsKeys.bookmarks,
-          mergeAudiobookBookmarkLists(local, remote),
+        final localUpdated =
+            prefs.getInt(AudiobookPrefsKeys.bookmarksUpdatedAt) ?? 0;
+        final merged = mergeAudiobookBookmarkLists(
+          local,
+          remote,
+          localUpdatedAt: localUpdated,
         );
+        await prefs.setStringList(AudiobookPrefsKeys.bookmarks, merged);
+        var remoteMax = 0;
+        for (final row in remote) {
+          final ts = _audiobookBookmarkTs(row);
+          if (ts > remoteMax) remoteMax = ts;
+        }
+        if (remoteMax > localUpdated) {
+          await prefs.setInt(AudiobookPrefsKeys.bookmarksUpdatedAt, remoteMax);
+        }
         notifyAudiobookPrefsChanged();
+        continue;
+      }
+      if (k == AudiobookPrefsKeys.bookmarksUpdatedAt) {
+        final n = v is int ? v : int.tryParse(v.toString());
+        if (n != null) {
+          await prefs.setInt(AudiobookPrefsKeys.bookmarksUpdatedAt, n);
+        }
         continue;
       }
       if (k == _torrentCacheTypeKey && v is String) {
