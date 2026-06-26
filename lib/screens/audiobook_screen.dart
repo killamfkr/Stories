@@ -91,17 +91,16 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
 
   Future<void> _maybeOfferAppUpdate() async {
     try {
-      final pkg = await AppUpdateService.instance.currentPackageInfo();
       final prefs = await SharedPreferences.getInstance();
-      final promptKey = 'stories_update_prompt_build';
-      final lastPromptBuild = prefs.getInt(promptKey);
-      final build = int.tryParse(pkg.buildNumber) ?? 0;
-      if (lastPromptBuild == build) return;
+      final promptKey = 'stories_update_prompt_remote_build';
+      final lastPromptRemoteBuild = prefs.getInt(promptKey) ?? 0;
 
       final offer = await AppUpdateService.instance.checkForUpdate();
       if (!mounted || offer == null) return;
 
-      await prefs.setInt(promptKey, build);
+      if (offer.remoteBuild <= lastPromptRemoteBuild) return;
+
+      await prefs.setInt(promptKey, offer.remoteBuild);
       if (!mounted) return;
       await showAppUpdateDialog(context, offer);
     } catch (_) {}

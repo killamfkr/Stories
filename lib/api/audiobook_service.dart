@@ -348,18 +348,32 @@ class AudiobookService {
       final chapters = await getChapters(book);
       prepared = (book: book, chapters: chapters);
     }
-    await _prefetchMagnetIfNeeded(prepared.book);
+    await _prefetchMagnetIfNeeded(prepared.book, prepared.chapters);
     return prepared;
   }
 
-  /// While the library spinner is visible, pull torrent metadata so playback starts faster.
-  Future<void> _prefetchMagnetIfNeeded(Audiobook book) async {
+  /// While the library spinner is visible, pull torrent metadata and warm the first chapter stream.
+  Future<void> _prefetchMagnetIfNeeded(
+    Audiobook book,
+    List<AudiobookChapter> chapters,
+  ) async {
     final magnet = book.magnetLink?.trim() ?? '';
     if (magnet.isEmpty) return;
     if (book.source != 'magnet' && book.source != 'audiobookbay') return;
     final torrent = TorrentStreamService();
     if (!await torrent.start()) return;
-    await torrent.prefetchAudiobookMagnet(magnet);
+    if (!await torrent.prefetchAudiobookMagnet(magnet)) return;
+
+    for (final ch in chapters) {
+      final idx = ch.torrentFileIndex;
+      if (idx == null) continue;
+      await torrent.prefetchAudiobookChapter(
+        magnet,
+        idx,
+        fileNameHint: ch.title,
+      );
+      break;
+    }
   }
 
   Future<List<Audiobook>> _searchTokybook(String query) async {

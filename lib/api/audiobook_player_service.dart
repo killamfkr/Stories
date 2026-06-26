@@ -495,7 +495,7 @@ class AudiobookPlayerService {
     await p.setProperty('cache', 'yes');
     await p.setProperty('demuxer-max-bytes', '50000000');
     await p.setProperty('demuxer-max-back-bytes', '50000000');
-    await p.setProperty('demuxer-readahead-secs', torrentBacked ? '12' : '30');
+    await p.setProperty('demuxer-readahead-secs', torrentBacked ? '4' : '30');
     if (torrentBacked) {
       await p.setProperty('force-seekable', 'yes');
       try {
@@ -772,7 +772,6 @@ class AudiobookPlayerService {
     if (!started) {
       throw Exception('Torrent engine failed to start');
     }
-    torrent.stopAudiobookStreamsForMagnet(magnet);
     final url = await torrent.streamAudiobookFile(
       magnet,
       ch.torrentFileIndex!,

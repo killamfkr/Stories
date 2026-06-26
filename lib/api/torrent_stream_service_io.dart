@@ -65,6 +65,9 @@ class TorrentStreamService {
   /// Audiobook chapter streams: info-hash → file index → stream id.
   final Map<String, Map<int, int>> _audiobookStreamsByFile = {};
 
+  /// Cached loopback URLs for active audiobook streams.
+  final Map<String, Map<int, String>> _audiobookStreamUrls = {};
+
   /// Track disposed torrent/stream IDs to prevent double-dispose native crash.
   final Set<int> _disposedTorrentIds = {};
   final Set<int> _disposedStreamIds = {};
@@ -279,6 +282,15 @@ class TorrentStreamService {
         }
 
         final byFile = _audiobookStreamsByFile.putIfAbsent(key, () => {});
+        final cachedUrl = _audiobookStreamUrls[key]?[streamIdx];
+        if (!stopSiblingStreams &&
+            byFile.containsKey(streamIdx) &&
+            cachedUrl != null &&
+            cachedUrl.isNotEmpty) {
+          _log('Audiobook stream cache hit idx=$streamIdx');
+          return cachedUrl;
+        }
+
         if (!stopSiblingStreams) {
           final oldSid = byFile[streamIdx];
           if (oldSid != null) {
@@ -293,6 +305,8 @@ class TorrentStreamService {
             maxCacheBytes: maxCacheBytes,
           );
           byFile[streamIdx] = streamInfo.id;
+          _audiobookStreamUrls.putIfAbsent(key, () => {})[streamIdx] =
+              streamInfo.url;
           _log(
             'Audiobook stream started idx=$streamIdx file=${fi.name} → ${streamInfo.url}',
           );
@@ -353,6 +367,21 @@ class TorrentStreamService {
     }
   }
 
+  /// Warms the HTTP stream for one chapter so playback can open immediately.
+  Future<String?> prefetchAudiobookChapter(
+    String magnetLink,
+    int fileIdx, {
+    String? fileNameHint,
+  }) {
+    return streamAudiobookFile(
+      magnetLink,
+      fileIdx,
+      allowNonStreamable: true,
+      stopSiblingStreams: false,
+      fileNameHint: fileNameHint,
+    );
+  }
+
   /// Stops audiobook streams and drops the torrent for this magnet.
   void releaseAudiobookMagnet(String magnetLink) {
     removeTorrent(magnetLink);
@@ -378,6 +407,7 @@ class TorrentStreamService {
   Future<List<FileInfo>?> _waitForMetadata(int torrentId, {Duration timeout = const Duration(seconds: 30)}) async {
     final completer = Completer<List<FileInfo>?>();
     StreamSubscription? sub;
+    var polls = 0;
 
     final timer = Timer(timeout, () {
       if (!completer.isCompleted) {
@@ -400,20 +430,25 @@ class TorrentStreamService {
       }
     });
 
-    // Also check if metadata is already available
-    try {
-      final files = LibtorrentFlutter.instance.getFiles(torrentId);
-      if (files.isNotEmpty) {
-        timer.cancel();
-        sub.cancel();
-        if (!completer.isCompleted) {
-          completer.complete(files);
-        }
+    Future<void> poll() async {
+      while (!completer.isCompleted && polls < 120) {
+        polls++;
+        try {
+          final files = LibtorrentFlutter.instance.getFiles(torrentId);
+          if (files.isNotEmpty) {
+            timer.cancel();
+            sub?.cancel();
+            if (!completer.isCompleted) {
+              completer.complete(files);
+            }
+            return;
+          }
+        } catch (_) {}
+        await Future.delayed(const Duration(milliseconds: 100));
       }
-    } catch (_) {
-      // Not ready yet, wait for updates
     }
 
+    unawaited(poll());
     return completer.future;
   }
 
@@ -581,6 +616,7 @@ class TorrentStreamService {
 
   void _stopAudiobookStreamsForMapKey(String mapKey) {
     final byFile = _audiobookStreamsByFile.remove(mapKey);
+    _audiobookStreamUrls.remove(mapKey);
     if (byFile == null) return;
     for (final streamId in byFile.values) {
       _safeStopStream(streamId);

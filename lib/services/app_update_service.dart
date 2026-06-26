@@ -26,11 +26,21 @@ class AppUpdateService {
     );
     if (current == null) return null;
 
-    final release = await _fetchLatestRelease();
+    final release = await _fetchNewestRelease();
     if (release == null) return null;
 
     final remote = AppVersion.parse(release.tagName);
-    if (remote == null || !remote.isNewerThan(current)) return null;
+    if (remote == null) {
+      debugPrint('[Stories Update] could not parse tag ${release.tagName}');
+      return null;
+    }
+
+    debugPrint(
+      '[Stories Update] current=${current.label} remote=${remote.label} '
+      'tag=${release.tagName}',
+    );
+
+    if (!remote.isNewerThan(current)) return null;
 
     final apkUrl = _apkAssetUrl(release);
     if (apkUrl == null) return null;
@@ -84,13 +94,17 @@ class AppUpdateService {
     );
   }
 
-  Future<_GhRelease?> _fetchLatestRelease() async {
+  /// GitHub returns releases by publish time, not version — scan for the highest.
+  Future<_GhRelease?> _fetchNewestRelease() async {
     final uri = Uri.parse(
-      'https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=8',
+      'https://api.github.com/repos/$repoOwner/$repoName/releases?per_page=30',
     );
     final res = await http.get(
       uri,
-      headers: const {'Accept': 'application/vnd.github+json'},
+      headers: const {
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'Stories-Android-Updater',
+      },
     ).timeout(const Duration(seconds: 20));
     if (res.statusCode != 200) {
       debugPrint('[Stories Update] releases ${res.statusCode}');
@@ -100,13 +114,25 @@ class AppUpdateService {
     final decoded = json.decode(res.body);
     if (decoded is! List) return null;
 
+    _GhRelease? bestRelease;
+    AppVersion? bestVersion;
+
     for (final raw in decoded) {
       if (raw is! Map) continue;
-      final draft = raw['draft'] == true;
-      if (draft) continue;
-      return _GhRelease.fromJson(raw.map((k, v) => MapEntry('$k', v)));
+      if (raw['draft'] == true) continue;
+
+      final release = _GhRelease.fromJson(raw.map((k, v) => MapEntry('$k', v)));
+      final version = AppVersion.parse(release.tagName);
+      if (version == null) continue;
+      if (_apkAssetUrl(release) == null) continue;
+
+      if (bestVersion == null || version.isNewerThan(bestVersion)) {
+        bestVersion = version;
+        bestRelease = release;
+      }
     }
-    return null;
+
+    return bestRelease;
   }
 
   String? _apkAssetUrl(_GhRelease release) {
@@ -134,6 +160,8 @@ class AppUpdateOffer {
   final String releaseNotes;
 
   String get versionLabel => remote.label;
+
+  int get remoteBuild => remote.build;
 }
 
 class AppVersion {
@@ -155,7 +183,7 @@ class AppVersion {
   static AppVersion? parse(String raw) {
     final cleaned = raw.trim().replaceFirst(RegExp(r'^v'), '');
     final match = RegExp(
-      r'^(\d+)\.(\d+)\.(\d+)(?:[+-](\d+))?$',
+      r'^(\d+)\.(\d+)\.(\d+)(?:[.+_-](\d+))?$',
     ).firstMatch(cleaned);
     if (match == null) return null;
     return AppVersion(
