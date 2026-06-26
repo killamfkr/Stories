@@ -22,8 +22,30 @@ class AppTheme {
         fontWeight: FontWeight.w700,
         color: textPrimary,
         letterSpacing: -0.5,
-        height: 1.1,
+        height: 1.0,
       );
+
+  /// Branded app title — always one line, scales down on narrow widths.
+  static Widget title({double? fontSize, Alignment alignment = Alignment.centerLeft}) {
+    final style = (fontSize == null
+            ? displayTitle
+            : displayTitle.copyWith(fontSize: fontSize))
+        .copyWith(height: 1.0);
+    return Align(
+      alignment: alignment,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: alignment,
+        child: Text(
+          'Stories',
+          style: style,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.clip,
+        ),
+      ),
+    );
+  }
 
   static TextStyle get sectionTitle => GoogleFonts.inter(
         fontSize: 13,

@@ -155,13 +155,7 @@ class _StoriesBootstrapScreenState extends State<StoriesBootstrapScreen> {
               ),
             ),
             const SizedBox(height: 28),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                'Stories',
-                style: AppTheme.displayTitle.copyWith(fontSize: 36),
-              ),
-            ),
+            AppTheme.title(fontSize: 36, alignment: Alignment.center),
             const SizedBox(height: 8),
             Text(
               'Your audiobook library',

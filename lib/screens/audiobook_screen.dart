@@ -485,10 +485,9 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
             child: InkWell(
               onTap: _goHome,
               borderRadius: BorderRadius.circular(8),
-              child: FittedBox(
-                fit: BoxFit.scaleDown,
-                alignment: Alignment.centerLeft,
-                child: Text('Stories', style: AppTheme.displayTitle),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: AppTheme.title(),
               ),
             ),
           ),
