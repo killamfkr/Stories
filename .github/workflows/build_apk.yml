@@ -127,29 +127,29 @@ jobs:
             fi
           done < <(gh release list --json tagName --jq '.[].tagName')
 
-      - name: Create or update draft GitHub release
+      - name: Create or update GitHub prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           NOTES="$(cat <<EOF
-          Draft Android release for Stories **${RELEASE_TAG}**.
+          Pre-release APK for Stories **${RELEASE_TAG}**.
 
           Built from commit ${GITHUB_SHA} on run ${GITHUB_RUN_ID}.
-          Rebuilds with the same \`pubspec.yaml\` version update this draft.
-          Bump the app version in \`pubspec.yaml\` to create a new release line.
+          Rebuilds with the same \`pubspec.yaml\` version replace this APK.
+          Bump the app version in \`pubspec.yaml\` to start a new release line.
           EOF
           )"
 
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" "${APK_NAME}" --clobber
             gh release edit "${RELEASE_TAG}" \
-              --draft \
+              --prerelease \
               --title "Stories ${RELEASE_TAG}" \
               --notes "$NOTES"
           else
             gh release create "${RELEASE_TAG}" "${APK_NAME}" \
-              --draft \
+              --prerelease \
               --title "Stories ${RELEASE_TAG}" \
               --target "${GITHUB_SHA}" \
               --notes "$NOTES"
@@ -158,7 +158,7 @@ jobs:
           URL="$(gh release view "${RELEASE_TAG}" --json url --jq .url)"
           echo "RELEASE_URL=${URL}" >> "$GITHUB_ENV"
           {
-            echo "## Draft release"
+            echo "## Release APK"
             echo ""
-            echo "APK attached to [Stories ${RELEASE_TAG}](${URL})."
+            echo "Download from [Stories ${RELEASE_TAG}](${URL})."
           } >> "$GITHUB_STEP_SUMMARY"
