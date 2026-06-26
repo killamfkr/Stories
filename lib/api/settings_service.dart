@@ -22,6 +22,38 @@ int _audiobookHistoryTs(String raw) {
   }
 }
 
+int _audiobookHistoryChapter(String raw) {
+  try {
+    return ((json.decode(raw) as Map)['chapterIndex'] as num?)?.toInt() ?? 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+int _audiobookHistoryPositionMs(String raw) {
+  try {
+    return ((json.decode(raw) as Map)['positionMs'] as num?)?.toInt() ?? 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
+String _pickBetterHistoryEntry(String a, String b) {
+  final chA = _audiobookHistoryChapter(a);
+  final chB = _audiobookHistoryChapter(b);
+  final posA = _audiobookHistoryPositionMs(a);
+  final posB = _audiobookHistoryPositionMs(b);
+  final tsA = _audiobookHistoryTs(a);
+  final tsB = _audiobookHistoryTs(b);
+
+  if (chA == chB) {
+    if (posB > 60_000 && posA < 5000) return b;
+    if (posA > 60_000 && posB < 5000) return a;
+    if (posA != posB) return posA > posB ? a : b;
+  }
+  return tsA >= tsB ? a : b;
+}
+
 int _audiobookBookmarkTs(String raw) {
   try {
     final m = json.decode(raw) as Map;
@@ -39,8 +71,10 @@ List<String> mergeAudiobookHistoryLists(List<String> local, List<String> remote)
     final id = _audiobookEntryId(x);
     if (id.isEmpty) return;
     final prev = map[id];
-    if (prev == null || _audiobookHistoryTs(x) >= _audiobookHistoryTs(prev)) {
+    if (prev == null) {
       map[id] = x;
+    } else {
+      map[id] = _pickBetterHistoryEntry(prev, x);
     }
   }
 

@@ -32,6 +32,7 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
   final AudiobookService _service = AudiobookService();
   final AudiobookPlayerService _playerService = AudiobookPlayerService();
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   
   List<Audiobook> _books = [];
   List<Audiobook> _likedBooks = [];
@@ -86,6 +87,7 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
       SettingsService.userAvatarChangeNotifier.removeListener(_avatarListener!);
     }
     _searchController.dispose();
+    _scrollController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -232,25 +234,43 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
   }
 
   void _resumeAudiobook(Map<String, dynamic> progress) async {
-    final rawBook = progress['book'];
+    final entry = progress;
+    final rawBook = entry['book'];
     if (rawBook is! Map) return;
     final book =
         Audiobook.fromJson(Map<String, dynamic>.from(rawBook as Map));
 
-    final ciRaw = progress['chapterIndex'];
+    final ciRaw = entry['chapterIndex'];
     var chapterIndex = ciRaw is int
         ? ciRaw
         : (ciRaw is num ? ciRaw.toInt() : int.tryParse('$ciRaw') ?? 0);
 
-    final pmRaw = progress['positionMs'];
+    final pmRaw = entry['positionMs'];
     var positionMs = pmRaw is int
         ? pmRaw
         : (pmRaw is num ? pmRaw.toInt() : int.tryParse('$pmRaw') ?? 0);
 
-    final isPlaceholder = progress['placeholderBookmark'] == true;
+    final isPlaceholder = entry['placeholderBookmark'] == true;
 
     // Grid "title only" bookmarks merge Continue Listening when present.
     if (isPlaceholder) {
+      final hist = await _playerService.getHistory();
+      for (final h in hist) {
+        final b = h['book'];
+        if (b is! Map) continue;
+        if ('${b['audioBookId']}' != book.audioBookId) continue;
+        final hciRaw = h['chapterIndex'];
+        final hpmRaw = h['positionMs'];
+        chapterIndex = hciRaw is int
+            ? hciRaw
+            : (hciRaw is num ? hciRaw.toInt() : int.tryParse('$hciRaw') ?? 0);
+        positionMs = hpmRaw is int
+            ? hpmRaw
+            : (hpmRaw is num ? hpmRaw.toInt() : int.tryParse('$hpmRaw') ?? 0);
+        break;
+      }
+    } else {
+      // Continue Listening: use the freshest saved row for this title.
       final hist = await _playerService.getHistory();
       for (final h in hist) {
         final b = h['book'];
@@ -404,6 +424,7 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
                 },
                 color: AppTheme.primaryColor,
                 child: SingleChildScrollView(
+                  controller: _scrollController,
                   physics: const AlwaysScrollableScrollPhysics(),
                   child: Column(
                     children: [
@@ -422,13 +443,41 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
     );
   }
 
+  void _goHome() {
+    setState(() {
+      _shelf = _AudiobookShelf.browse;
+      _isSearching = false;
+      _searchController.clear();
+      if (_currentOffset != 0) {
+        _currentOffset = 0;
+        _loadBooks();
+      }
+    });
+    if (_scrollController.hasClients) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 20, 16, 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Expanded(child: Text('Stories', style: AppTheme.displayTitle)),
+          Expanded(
+            child: InkWell(
+              onTap: _goHome,
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Text('Stories', style: AppTheme.displayTitle),
+              ),
+            ),
+          ),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [

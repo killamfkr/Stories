@@ -31,7 +31,12 @@ class PlaytorrioCloudSyncService {
   static const _restSettings = '/rest/v1/user_settings';
   static const _preferUpsert = 'return=minimal,resolution=merge-duplicates';
 
-  final _secure = const FlutterSecureStorage();
+  final _secure = const FlutterSecureStorage(
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+      resetOnError: true,
+    ),
+  );
   final _settings = SettingsService();
 
   String? _access;
@@ -64,15 +69,24 @@ class PlaytorrioCloudSyncService {
     }
   }
 
+  Future<String?> _readSecure(String key) async {
+    try {
+      return await _secure.read(key: key).timeout(const Duration(seconds: 4));
+    } catch (e) {
+      debugPrint('[Stories Cloud] secure read $key: $e');
+      return null;
+    }
+  }
+
   Future<String?> get _accessToken async {
     if (_access != null && _access!.isNotEmpty) return _access;
-    _access = await _secure.read(key: _accessKey);
+    _access = await _readSecure(_accessKey);
     return _access;
   }
 
   Future<String?> get _refreshToken async {
     if (_refresh != null && _refresh!.isNotEmpty) return _refresh;
-    _refresh = await _secure.read(key: _refreshKey);
+    _refresh = await _readSecure(_refreshKey);
     return _refresh;
   }
 
@@ -175,7 +189,7 @@ class PlaytorrioCloudSyncService {
     }
   }
 
-  Future<String?> signedInEmail() => _secure.read(key: _emailKey);
+  Future<String?> signedInEmail() => _readSecure(_emailKey);
 
   Future<void> _ensureAccess() async {
     final existing = await _accessToken;

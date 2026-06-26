@@ -53,6 +53,8 @@ class AudiobookPlayerService {
   DateTime? _ignoreProgressPersistenceUntil;
   /// While non-null, ignore player clock readings that snap back to the start.
   Duration? _resumeTargetPosition;
+  /// Torrent loopback URLs often never report a trustworthy position.
+  bool _streamClockUnreliable = false;
 
   bool _acceptPlayerPosition(Duration playerPosition) {
     final target = _resumeTargetPosition;
@@ -128,6 +130,17 @@ class AudiobookPlayerService {
 
     _subscriptions.add(_player.stream.position.listen((p) {
       if (isPreparingPlayback.value) return;
+      if (_streamClockUnreliable && isPlaying.value) {
+        if (p > position.value + const Duration(seconds: 1)) {
+          if (!_acceptPlayerPosition(p)) return;
+          position.value = p;
+          _wallClockBase = p;
+          _markWallClock(base: p);
+          _updateSystemState();
+          _scheduleDebouncedProgressSave();
+        }
+        return;
+      }
       if (!_acceptPlayerPosition(p)) return;
       position.value = p;
       _wallClockBase = p;
@@ -273,7 +286,7 @@ class AudiobookPlayerService {
   Future<void> _settleResumePosition(Duration target) async {
     _resumeTargetPosition = target;
     _ignoreProgressPersistenceUntil =
-        DateTime.now().add(const Duration(seconds: 6));
+        DateTime.now().add(const Duration(seconds: 20));
 
     for (var attempt = 0; attempt < 10; attempt++) {
       await _player.seek(target);
@@ -288,7 +301,11 @@ class AudiobookPlayerService {
           '(target ${target.inSeconds}s, attempt ${attempt + 1})',
         );
         _applyResolvedPosition(p);
-        _resumeTargetPosition = null;
+        Future.delayed(const Duration(seconds: 15), () {
+          if (_resumeTargetPosition == target) {
+            _resumeTargetPosition = null;
+          }
+        });
         return;
       }
     }
@@ -308,7 +325,11 @@ class AudiobookPlayerService {
     } else {
       _applyResolvedPosition(target);
     }
-    _resumeTargetPosition = null;
+    Future.delayed(const Duration(seconds: 15), () {
+      if (_resumeTargetPosition == target) {
+        _resumeTargetPosition = null;
+      }
+    });
   }
 
   /// After play() on a torrent stream, wait until the loopback URL is primed.
@@ -387,7 +408,7 @@ class AudiobookPlayerService {
       var wall =
           _wallClockBase + DateTime.now().difference(_wallClockStartedAt!);
       if (d > Duration.zero && wall > d) wall = d;
-      if (wall > position.value) {
+      if (wall > position.value || _streamClockUnreliable) {
         position.value = wall;
         changed = true;
       }
@@ -480,6 +501,7 @@ class AudiobookPlayerService {
     _isResuming = initialChapter > 0 ||
         (resumePosition != null && resumePosition > Duration.zero);
     _resumeTargetPosition = null;
+    _streamClockUnreliable = false;
     _resetPlaybackUiState();
     _wallClockBase =
         _isResuming && resumePosition != null ? resumePosition : Duration.zero;
@@ -525,15 +547,20 @@ class AudiobookPlayerService {
 
     // Optimize for streaming audiobooks (once per player).
     final torrentBacked = book.source == 'magnet' || book.source == 'audiobookbay';
+    _streamClockUnreliable = torrentBacked;
     await _ensureMpvAudiobookTuning(torrentBacked: torrentBacked);
 
-    final media = await _mediaForChapter(book, chapters[idx]);
+    final needsSeek =
+        resumePosition != null && resumePosition > Duration.zero;
+    final media = await _mediaForChapter(
+      book,
+      chapters[idx],
+      startAt: needsSeek && !torrentBacked ? resumePosition : null,
+    );
 
     // Open without auto-playing first to allow seek to settle
     await _player.open(media, play: false);
 
-    final needsSeek =
-        resumePosition != null && resumePosition > Duration.zero;
     var resumeAlreadyPlaying = false;
     Duration? preparingPositionHint;
 
@@ -541,11 +568,16 @@ class AudiobookPlayerService {
       debugPrint(
         'AudiobookPlayerService: Resuming chapter $idx at $resumePosition',
       );
-      // Start playback before seeking — seeking a cold stream at play:false often snaps to 0.
       await _player.play();
       resumeAlreadyPlaying = true;
-      await _waitForResumeReady(book, chapters[idx]);
-      await _settleResumePosition(resumePosition);
+      if (torrentBacked) {
+        await _waitForResumeReady(book, chapters[idx]);
+        await _settleResumePosition(resumePosition!);
+      } else {
+        _ignoreProgressPersistenceUntil =
+            DateTime.now().add(const Duration(seconds: 8));
+        _applyResolvedPosition(resumePosition!);
+      }
       preparingPositionHint = position.value > Duration.zero
           ? position.value
           : resumePosition;
@@ -560,7 +592,11 @@ class AudiobookPlayerService {
     _finishPreparingPlayback(positionHint: preparingPositionHint);
   }
 
-  Future<Media> _mediaForChapter(Audiobook book, AudiobookChapter ch) async {
+  Future<Media> _mediaForChapter(
+    Audiobook book,
+    AudiobookChapter ch, {
+    Duration? startAt,
+  }) async {
     final magnet = book.magnetLink;
     final torrentBacked = (book.source == 'magnet' || book.source == 'audiobookbay') &&
         magnet != null &&
@@ -568,7 +604,11 @@ class AudiobookPlayerService {
         ch.torrentFileIndex != null;
     if (!torrentBacked) {
       final headers = ch.headers ?? const <String, String>{};
-      return Media(ch.url, httpHeaders: headers);
+      return Media(
+        ch.url,
+        httpHeaders: headers,
+        start: startAt,
+      );
     }
 
     final torrent = TorrentStreamService();
@@ -591,7 +631,7 @@ class AudiobookPlayerService {
     if (ch.headers != null) {
       merged.addAll(ch.headers!);
     }
-    return Media(url, httpHeaders: merged);
+    return Media(url, httpHeaders: merged, start: startAt);
   }
 
   void playOrPause() {
@@ -651,20 +691,23 @@ class AudiobookPlayerService {
     if (isPreparingPlayback.value) {
       return _wallClockBase.inMilliseconds;
     }
+
+    var bestMs = position.value.inMilliseconds;
     final fromPlayer = _player.state.position;
     if (fromPlayer > Duration.zero) {
-      return fromPlayer.inMilliseconds;
+      bestMs = fromPlayer.inMilliseconds > bestMs
+          ? fromPlayer.inMilliseconds
+          : bestMs;
     }
     if (isPlaying.value && _wallClockStartedAt != null) {
       var wall =
           _wallClockBase + DateTime.now().difference(_wallClockStartedAt!);
       final d = duration.value;
       if (d > Duration.zero && wall > d) wall = d;
-      return wall.inMilliseconds;
+      if (wall.inMilliseconds > bestMs) bestMs = wall.inMilliseconds;
     }
-    final ms = position.value.inMilliseconds;
-    if (ms >= 0) return ms;
-    return 0;
+    if (bestMs < 0) return 0;
+    return bestMs;
   }
 
   /// Chapter index clamped to the loaded chapter list + live player clock (for bookmarks).
@@ -727,8 +770,13 @@ class AudiobookPlayerService {
     if (prevSame != null) {
       final pCh = (prevSame['chapterIndex'] as num?)?.toInt() ?? 0;
       final pMs = (prevSame['positionMs'] as num?)?.toInt() ?? 0;
-      if (outCh == pCh && outMs < 500 && pMs > 5_000) {
-        outMs = pMs;
+      if (outCh == pCh) {
+        if (outMs < 500 && pMs > 1_000) {
+          outMs = pMs;
+        } else if (outMs + 15_000 < pMs) {
+          // Never regress saved progress on the same chapter.
+          outMs = pMs;
+        }
       }
     }
 
@@ -739,7 +787,11 @@ class AudiobookPlayerService {
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
-    history.removeWhere((item) => item['book']['audioBookId'] == bid);
+    history.removeWhere((item) {
+      final b = item['book'];
+      if (b is! Map) return false;
+      return '${b['audioBookId']}' == bid;
+    });
     history.insert(0, bookData);
 
     if (history.length > 10) history = history.sublist(0, 10);

@@ -44,24 +44,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final cloud = PlaytorrioCloudSyncService.instance;
-    final session = await cloud.hasStoredSession();
-    final sync = await cloud.isSettingsSyncEnabled();
-    final email = await cloud.signedInEmail();
-    final cacheType = await _settings.getTorrentCacheType();
-    final cacheMb = await _settings.getTorrentRamCacheMb();
-    final avatar = await _settings.getUserAvatarIndex();
-    if (!mounted) return;
-    setState(() {
-      _loading = false;
-      _sessionPresent = session;
-      _syncEnabled = sync;
-      _configured = cloud.isConfigured;
-      _signedInEmail = email;
-      _avatarIndex = avatar;
-      _torrentCacheType = cacheType;
-      _torrentRamCacheMb = cacheMb;
-    });
+    try {
+      final cloud = PlaytorrioCloudSyncService.instance;
+      final session = await cloud.hasStoredSession();
+      final sync = await cloud.isSettingsSyncEnabled();
+      final email = await cloud.signedInEmail();
+      final cacheType = await _settings.getTorrentCacheType();
+      final cacheMb = await _settings.getTorrentRamCacheMb();
+      final avatar = await _settings.getUserAvatarIndex();
+      if (!mounted) return;
+      setState(() {
+        _sessionPresent = session;
+        _syncEnabled = sync;
+        _configured = cloud.isConfigured;
+        _signedInEmail = email;
+        _avatarIndex = avatar;
+        _torrentCacheType = cacheType;
+        _torrentRamCacheMb = cacheMb;
+      });
+    } catch (e) {
+      debugPrint('SettingsScreen load failed: $e');
+      if (!mounted) return;
+      setState(() => _configured = PlaytorrioCloudSyncService.instance.isConfigured);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _selectAvatar(int index) async {
