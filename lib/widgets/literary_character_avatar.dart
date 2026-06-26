@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// Original book + literary character avatars for profile pictures.
+/// Photorealistic book-character portraits for profile pictures.
 class LiteraryAvatarInfo {
   const LiteraryAvatarInfo(this.label, this.subtitle, this.assetPath);
 

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generate flat book + literary character avatars for the Stories app."""
+"""Legacy flat avatar generator (superseded by realistic portrait assets).
+
+The bundled profile avatars in assets/avatars/ are AI-generated portraits.
+Only run this script if you intentionally want to replace them with flat art.
+"""
 
 from __future__ import annotations
 
