@@ -39,12 +39,13 @@ if not root_gradle.exists():
 
 root_text = root_gradle.read_text()
 root_text = re.sub(
-    rf"\n// {re.escape(marker)}\n.*?(?=\n(?:subprojects|tasks\.register|\Z))",
+    rf"\n// {re.escape(marker)}\n.*?(?=\nsubprojects \{{\n    project\.evaluationDependsOn|\ntasks\.register|\Z)",
     "\n",
     root_text,
     flags=re.DOTALL,
 )
 
+# afterEvaluate must be registered BEFORE evaluationDependsOn(:app).
 block = f"""
 // {marker}
 subprojects {{
@@ -53,15 +54,18 @@ subprojects {{
             compileSdk = {compile_sdk}
         }}
     }}
+    afterEvaluate {{
+        extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)?.apply {{
+            compileSdk = {compile_sdk}
+        }}
+    }}
 }}
 """
 
 needle = "subprojects {\n    project.evaluationDependsOn(\":app\")"
-if needle in root_text:
-    root_text = root_text.replace(needle, block + "\n" + needle, 1)
-elif marker not in root_text:
-    root_text = root_text.rstrip() + "\n" + block
-
+if needle not in root_text:
+    raise SystemExit("error: expected evaluationDependsOn block in android/build.gradle.kts")
+root_text = root_text.replace(needle, block + "\n" + needle, 1)
 root_gradle.write_text(root_text)
 print(f"Configured plugin compileSdk {compile_sdk} in android/build.gradle.kts")
 PY
