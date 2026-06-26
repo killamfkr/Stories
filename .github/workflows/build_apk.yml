@@ -115,19 +115,50 @@ jobs:
           path: ${{ env.APK_NAME }}
           if-no-files-found: error
 
-      - name: Create or update draft GitHub release
-        uses: ncipollo/release-action@v1
-        with:
-          tag: ${{ env.RELEASE_TAG }}
-          name: Stories ${{ env.RELEASE_TAG }}
-          draft: true
-          allowUpdates: true
-          replacesArtifacts: true
-          artifacts: ${{ env.APK_NAME }}
-          artifactContentType: application/vnd.android.package-archive
-          body: |
-            Draft Android release for Stories **${{ env.RELEASE_TAG }}**.
+      - name: Remove legacy published per-build releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r tag; do
+            [[ -z "$tag" ]] && continue
+            if [[ "$tag" =~ -build\.[0-9]+$ ]]; then
+              gh release delete "$tag" --yes --cleanup-tag || true
+            fi
+          done < <(gh release list --json tagName --jq '.[].tagName')
 
-            Built from commit ${{ github.sha }} on ${{ github.run_id }}.
-            Rebuilds with the same `pubspec.yaml` version update this draft.
-            Bump the app version in `pubspec.yaml` to create a new release line.
+      - name: Create or update draft GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          NOTES="$(cat <<EOF
+          Draft Android release for Stories **${RELEASE_TAG}**.
+
+          Built from commit ${GITHUB_SHA} on run ${GITHUB_RUN_ID}.
+          Rebuilds with the same \`pubspec.yaml\` version update this draft.
+          Bump the app version in \`pubspec.yaml\` to create a new release line.
+          EOF
+          )"
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" "${APK_NAME}" --clobber
+            gh release edit "${RELEASE_TAG}" \
+              --draft \
+              --title "Stories ${RELEASE_TAG}" \
+              --notes "$NOTES"
+          else
+            gh release create "${RELEASE_TAG}" "${APK_NAME}" \
+              --draft \
+              --title "Stories ${RELEASE_TAG}" \
+              --target "${GITHUB_SHA}" \
+              --notes "$NOTES"
+          fi
+
+          URL="$(gh release view "${RELEASE_TAG}" --json url --jq .url)"
+          echo "RELEASE_URL=${URL}" >> "$GITHUB_ENV"
+          {
+            echo "## Draft release"
+            echo ""
+            echo "APK attached to [Stories ${RELEASE_TAG}](${URL})."
+          } >> "$GITHUB_STEP_SUMMARY"
