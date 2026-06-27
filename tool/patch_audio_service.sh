@@ -52,7 +52,28 @@ else:
     print("Patched audio_service.dart init order")
 
 marker = "STORIES_ANDROID_AUTO_FALLBACK"
-if marker in java:
+context_resolver = """            Context storiesCtx = AudioService.instance != null
+                    ? AudioService.instance.getApplicationContext()
+                    : null;"""
+
+old_load_bad = """            if (!flutterReady || audioHandlerInterface == null) {
+                result.sendResult(storiesBrowseFallback(applicationContext, parentMediaId));
+                return;
+            }"""
+
+new_load_fixed = context_resolver + """
+            if (!flutterReady || audioHandlerInterface == null) {
+                result.sendResult(storiesCtx != null
+                        ? storiesBrowseFallback(storiesCtx, parentMediaId)
+                        : new ArrayList<>());
+                return;
+            }"""
+
+if old_load_bad in java:
+    java = java.replace(old_load_bad, new_load_fixed, 1)
+    java_path.write_text(java)
+    print("Fixed AudioServicePlugin.java fallback context reference")
+elif marker in java:
     print("AudioServicePlugin.java already patched")
 else:
     helper = r'''
@@ -118,8 +139,11 @@ else:
             if (audioHandlerInterface != null) {"""
     new_load = """        @Override
         public void onLoadChildren(final String parentMediaId, final MediaBrowserServiceCompat.Result<List<MediaBrowserCompat.MediaItem>> result, Bundle options) {
+""" + context_resolver + """
             if (!flutterReady || audioHandlerInterface == null) {
-                result.sendResult(storiesBrowseFallback(applicationContext, parentMediaId));
+                result.sendResult(storiesCtx != null
+                        ? storiesBrowseFallback(storiesCtx, parentMediaId)
+                        : new ArrayList<>());
                 return;
             }
             if (audioHandlerInterface != null) {"""
