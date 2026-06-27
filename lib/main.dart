@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import 'api/android_auto_browse.dart';
 import 'api/audiobook_player_service.dart';
 import 'api/audio_handler.dart';
 import 'api/local_server_service.dart';
@@ -27,10 +28,8 @@ Future<void> main() async {
   AudiobookPlayerService().ensurePlayerListeners();
   unawaited(AudiobookPlayerService().ensurePlaybackRateLoaded());
 
-  await _configureAudioSession();
+  unawaited(_configureAudioSession());
 
-  // Audio service must start before permission dialogs — Android Auto can wake the
-  // app headlessly and browse requests block until [AudioService.init] completes.
   try {
     final audioHandler = await AudioService.init(
       builder: () => PlayTorrioAudioHandler(MusicPlayerService().player),
@@ -57,15 +56,20 @@ Future<void> main() async {
               AndroidContentStyle.listItemHintValue,
         },
       ),
+    ).timeout(
+      const Duration(seconds: 12),
+      onTimeout: () {
+        throw TimeoutException('AudioService.init timed out');
+      },
     );
     MusicPlayerService().setHandler(audioHandler);
     AudiobookPlayerService().attachHandler(audioHandler);
+    unawaited(AndroidAutoBrowse.warmCache());
     debugPrint('[Stories] AudioService ready');
   } catch (e, st) {
     debugPrint('[Stories] AudioService failed: $e\n$st');
-    final extra =
-        'Lock-screen notification unavailable ($e). Rebuild after running tool/patch_android.sh.';
-    audiobookAudioInitWarning = extra;
+    audiobookAudioInitWarning =
+        'Lock-screen notification unavailable ($e). Rebuild after running tool/patch_android.sh and tool/patch_audio_service.sh.';
   }
 
   runApp(const StoriesApp());
@@ -73,6 +77,7 @@ Future<void> main() async {
   if (platformIsAndroid) {
     unawaited(_requestAndroidStartupPermissions());
   }
+  unawaited(_warmBackgroundEngines());
 }
 
 class StoriesApp extends StatelessWidget {
@@ -84,109 +89,38 @@ class StoriesApp extends StatelessWidget {
       title: 'Stories',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.materialTheme,
-      home: const StoriesBootstrapScreen(),
+      home: AudiobookScreen(initWarning: audiobookAudioInitWarning),
     );
   }
 }
 
-/// Starts torrent/proxy engines, then opens the library.
-class StoriesBootstrapScreen extends StatefulWidget {
-  const StoriesBootstrapScreen({super.key});
-
-  @override
-  State<StoriesBootstrapScreen> createState() => _StoriesBootstrapScreenState();
-}
-
-class _StoriesBootstrapScreenState extends State<StoriesBootstrapScreen> {
-  bool _ready = false;
-  String? _status;
-
-  @override
-  void initState() {
-    super.initState();
-    unawaited(_bootstrap());
+Future<void> _warmBackgroundEngines() async {
+  try {
+    await LocalServerService().start();
+  } catch (e) {
+    debugPrint('[Stories] LocalServer failed: $e');
   }
 
-  Future<void> _bootstrap() async {
-    setState(() => _status = 'Opening your library…');
-
-    try {
-      await LocalServerService().start();
-    } catch (e) {
-      debugPrint('[Stories] LocalServer failed: $e');
-    }
-
-    if (!mounted) return;
-    setState(() => _ready = true);
-
-    unawaited(
-      TorrentStreamService()
-          .start()
-          .timeout(
-            const Duration(seconds: 12),
-            onTimeout: () {
-              debugPrint('[Stories] Torrent engine timed out');
-              return false;
-            },
-          )
-          .catchError((Object e, StackTrace st) {
-            debugPrint('[Stories] Torrent engine failed: $e\n$st');
+  unawaited(
+    TorrentStreamService()
+        .start()
+        .timeout(
+          const Duration(seconds: 12),
+          onTimeout: () {
+            debugPrint('[Stories] Torrent engine timed out');
             return false;
-          }),
-    );
-    unawaited(
-      PlaytorrioCloudSyncService.instance.pullOnStartup().catchError((Object e) {
-        debugPrint('[Stories] Cloud pull failed: $e');
-      }),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_ready) {
-      return AudiobookScreen(initWarning: audiobookAudioInitWarning);
-    }
-
-    return Scaffold(
-      backgroundColor: AppTheme.bgDark,
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(22),
-              child: Image.asset(
-                'assets/icon/icon.png',
-                width: 88,
-                height: 88,
-                fit: BoxFit.cover,
-              ),
-            ),
-            const SizedBox(height: 28),
-            AppTheme.title(fontSize: 36, alignment: Alignment.center),
-            const SizedBox(height: 8),
-            Text(
-              'Your audiobook library',
-              style: AppTheme.sectionTitle.copyWith(letterSpacing: 0.4),
-            ),
-            const SizedBox(height: 36),
-            const SizedBox(
-              width: 28,
-              height: 28,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: AppTheme.primaryColor,
-              ),
-            ),
-            if (_status != null) ...[
-              const SizedBox(height: 18),
-              Text(_status!, style: Theme.of(context).textTheme.bodySmall),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
+          },
+        )
+        .catchError((Object e, StackTrace st) {
+          debugPrint('[Stories] Torrent engine failed: $e\n$st');
+          return false;
+        }),
+  );
+  unawaited(
+    PlaytorrioCloudSyncService.instance.pullOnStartup().catchError((Object e) {
+      debugPrint('[Stories] Cloud pull failed: $e');
+    }),
+  );
 }
 
 Future<void> _requestAndroidStartupPermissions() async {

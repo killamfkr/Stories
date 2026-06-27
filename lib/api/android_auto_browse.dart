@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:rxdart/rxdart.dart';
 
 import 'android_auto_ids.dart';
+import '../services/android_auto_native_cache.dart';
 import 'audiobook_player_service.dart';
 import 'audiobook_service.dart';
 
@@ -20,6 +21,7 @@ abstract final class AndroidAutoBrowse {
     _cachedRoot = null;
     _cachedRecent = null;
     _childrenChanged.add(null);
+    unawaited(_refreshCache());
   }
 
   static ValueStream<Map<String, dynamic>> subscribeToChildren(
@@ -52,6 +54,12 @@ abstract final class AndroidAutoBrowse {
     try {
       _cachedRoot = await _rootChildren();
       _cachedRecent = await _recentChildren();
+      final continueItems = await _continueListeningChildren();
+      await AndroidAutoNativeCache.saveBrowseTree(
+        root: _cachedRoot!,
+        recent: _cachedRecent!,
+        continueListening: continueItems,
+      );
     } catch (e, st) {
       debugPrint('AndroidAutoBrowse: cache refresh failed: $e\n$st');
     }

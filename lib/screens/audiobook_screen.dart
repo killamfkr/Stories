@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../api/audiobook_service.dart';
+import '../api/android_auto_browse.dart';
 import '../api/audiobook_player_service.dart';
 import '../api/music_player_service.dart';
 import '../api/settings_service.dart';
@@ -171,6 +172,7 @@ class _AudiobookScreenState extends State<AudiobookScreen> with WidgetsBindingOb
     if (mounted) {
       setState(() => _history = history);
     }
+    unawaited(AndroidAutoBrowse.warmCache());
   }
 
   Future<void> _loadLikedBooks() async {
