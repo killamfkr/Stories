@@ -1,4 +1,6 @@
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart';
+import 'package:rxdart/rxdart.dart';
 
 import 'android_auto_ids.dart';
 import 'audiobook_player_service.dart';
@@ -6,9 +8,36 @@ import 'audiobook_service.dart';
 
 /// Media browse tree and playback entry points for Android Auto.
 abstract final class AndroidAutoBrowse {
+  static final _childrenChanged = BehaviorSubject<void>.seeded(null);
+  static List<MediaItem>? _cachedRoot;
+  static List<MediaItem>? _cachedRecent;
+
+  /// Preload browse nodes so Android Auto gets a fast first response.
+  static Future<void> warmCache() => _refreshCache();
+
+  /// Call after listening history changes so Android Auto refreshes its tree.
+  static void invalidateCache() {
+    _cachedRoot = null;
+    _cachedRecent = null;
+    _childrenChanged.add(null);
+  }
+
+  static ValueStream<Map<String, dynamic>> subscribeToChildren(
+    String parentMediaId,
+  ) {
+    return _childrenChanged
+        .map((_) => <String, dynamic>{})
+        .shareValueSeeded(<String, dynamic>{});
+  }
+
   static Future<List<MediaItem>> childrenFor(String parentMediaId) async {
+    if (parentMediaId == AudioService.recentRootId) {
+      _cachedRecent ??= await _recentChildren();
+      return _cachedRecent!;
+    }
     if (parentMediaId == AudioService.browsableRootId) {
-      return _rootChildren();
+      _cachedRoot ??= await _rootChildren();
+      return _cachedRoot!;
     }
     if (parentMediaId == AndroidAutoIds.continueParentId) {
       return _continueListeningChildren();
@@ -17,6 +46,15 @@ abstract final class AndroidAutoBrowse {
       return _nowPlayingChapterChildren();
     }
     return const [];
+  }
+
+  static Future<void> _refreshCache() async {
+    try {
+      _cachedRoot = await _rootChildren();
+      _cachedRecent = await _recentChildren();
+    } catch (e, st) {
+      debugPrint('AndroidAutoBrowse: cache refresh failed: $e\n$st');
+    }
   }
 
   static Future<List<MediaItem>> _rootChildren() async {
@@ -52,25 +90,59 @@ abstract final class AndroidAutoBrowse {
     return items;
   }
 
+  static Future<List<MediaItem>> _recentChildren() async {
+    final history = await AudiobookPlayerService().getHistory();
+    if (history.isEmpty) return const [];
+
+    final progress = history.first;
+    final rawBook = progress['book'];
+    if (rawBook is! Map) return const [];
+
+    try {
+      final book = Audiobook.fromJson(Map<String, dynamic>.from(rawBook));
+      final ciRaw = progress['chapterIndex'];
+      final chapterIndex = ciRaw is int
+          ? ciRaw
+          : (ciRaw is num ? ciRaw.toInt() : int.tryParse('$ciRaw') ?? 0);
+      return [
+        MediaItem(
+          id: AndroidAutoIds.resume(book.audioBookId),
+          album: 'Continue listening',
+          title: book.title,
+          artist: 'Chapter ${chapterIndex + 1}',
+          artUri: _artUriForBook(book),
+          playable: true,
+        ),
+      ];
+    } catch (e) {
+      debugPrint('AndroidAutoBrowse: recent item failed: $e');
+      return const [];
+    }
+  }
+
   static Future<List<MediaItem>> _continueListeningChildren() async {
     final history = await AudiobookPlayerService().getHistory();
     final items = <MediaItem>[];
     for (final progress in history) {
       final rawBook = progress['book'];
       if (rawBook is! Map) continue;
-      final book = Audiobook.fromJson(Map<String, dynamic>.from(rawBook));
-      final ciRaw = progress['chapterIndex'];
-      final chapterIndex = ciRaw is int
-          ? ciRaw
-          : (ciRaw is num ? ciRaw.toInt() : int.tryParse('$ciRaw') ?? 0);
-      items.add(MediaItem(
-        id: AndroidAutoIds.resume(book.audioBookId),
-        album: 'Continue listening',
-        title: book.title,
-        artist: 'Chapter ${chapterIndex + 1}',
-        artUri: _artUriForBook(book),
-        playable: true,
-      ));
+      try {
+        final book = Audiobook.fromJson(Map<String, dynamic>.from(rawBook));
+        final ciRaw = progress['chapterIndex'];
+        final chapterIndex = ciRaw is int
+            ? ciRaw
+            : (ciRaw is num ? ciRaw.toInt() : int.tryParse('$ciRaw') ?? 0);
+        items.add(MediaItem(
+          id: AndroidAutoIds.resume(book.audioBookId),
+          album: 'Continue listening',
+          title: book.title,
+          artist: 'Chapter ${chapterIndex + 1}',
+          artUri: _artUriForBook(book),
+          playable: true,
+        ));
+      } catch (e) {
+        debugPrint('AndroidAutoBrowse: skip history row: $e');
+      }
     }
     return items;
   }
@@ -106,6 +178,10 @@ abstract final class AndroidAutoBrowse {
       album: subtitle ?? 'Stories',
       artUri: artUri,
       playable: false,
+      extras: const {
+        AndroidContentStyle.browsableHintKey:
+            AndroidContentStyle.listItemHintValue,
+      },
     );
   }
 

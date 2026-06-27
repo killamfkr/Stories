@@ -28,15 +28,9 @@ Future<void> main() async {
   unawaited(AudiobookPlayerService().ensurePlaybackRateLoaded());
 
   await _configureAudioSession();
-  if (platformIsAndroid) {
-    final notificationStatus = await Permission.notification.request();
-    if (!notificationStatus.isGranted) {
-      audiobookAudioInitWarning =
-          'Enable notifications for Stories to show playback controls in the shade.';
-    }
-    await AndroidBackgroundPolicyService.instance.ensureBatteryOnStartup();
-  }
 
+  // Audio service must start before permission dialogs — Android Auto can wake the
+  // app headlessly and browse requests block until [AudioService.init] completes.
   try {
     final audioHandler = await AudioService.init(
       builder: () => PlayTorrioAudioHandler(MusicPlayerService().player),
@@ -55,6 +49,13 @@ Future<void> main() async {
         preloadArtwork: true,
         fastForwardInterval: const Duration(seconds: 30),
         rewindInterval: const Duration(seconds: 15),
+        androidBrowsableRootExtras: const {
+          AndroidContentStyle.supportedKey: true,
+          AndroidContentStyle.browsableHintKey:
+              AndroidContentStyle.listItemHintValue,
+          AndroidContentStyle.playableHintKey:
+              AndroidContentStyle.listItemHintValue,
+        },
       ),
     );
     MusicPlayerService().setHandler(audioHandler);
@@ -64,12 +65,14 @@ Future<void> main() async {
     debugPrint('[Stories] AudioService failed: $e\n$st');
     final extra =
         'Lock-screen notification unavailable ($e). Rebuild after running tool/patch_android.sh.';
-    audiobookAudioInitWarning = audiobookAudioInitWarning == null
-        ? extra
-        : '${audiobookAudioInitWarning!} $extra';
+    audiobookAudioInitWarning = extra;
   }
 
   runApp(const StoriesApp());
+
+  if (platformIsAndroid) {
+    unawaited(_requestAndroidStartupPermissions());
+  }
 }
 
 class StoriesApp extends StatelessWidget {
@@ -107,10 +110,16 @@ class _StoriesBootstrapScreenState extends State<StoriesBootstrapScreen> {
   Future<void> _bootstrap() async {
     setState(() => _status = 'Opening your library…');
 
-    await Future.wait([
-      LocalServerService().start().catchError((Object e) {
-        debugPrint('[Stories] LocalServer failed: $e');
-      }),
+    try {
+      await LocalServerService().start();
+    } catch (e) {
+      debugPrint('[Stories] LocalServer failed: $e');
+    }
+
+    if (!mounted) return;
+    setState(() => _ready = true);
+
+    unawaited(
       TorrentStreamService()
           .start()
           .timeout(
@@ -124,13 +133,12 @@ class _StoriesBootstrapScreenState extends State<StoriesBootstrapScreen> {
             debugPrint('[Stories] Torrent engine failed: $e\n$st');
             return false;
           }),
+    );
+    unawaited(
       PlaytorrioCloudSyncService.instance.pullOnStartup().catchError((Object e) {
         debugPrint('[Stories] Cloud pull failed: $e');
       }),
-    ]);
-
-    if (!mounted) return;
-    setState(() => _ready = true);
+    );
   }
 
   @override
@@ -178,6 +186,27 @@ class _StoriesBootstrapScreenState extends State<StoriesBootstrapScreen> {
         ),
       ),
     );
+  }
+}
+
+Future<void> _requestAndroidStartupPermissions() async {
+  try {
+    final notificationStatus = await Permission.notification.request();
+    if (!notificationStatus.isGranted) {
+      audiobookAudioInitWarning =
+          'Enable notifications for Stories to show playback controls in the shade.';
+    }
+  } catch (e) {
+    debugPrint('[Stories] Notification permission: $e');
+  }
+
+  try {
+    final battery = AndroidBackgroundPolicyService.instance;
+    if (!await battery.isBatteryUnrestricted()) {
+      await battery.requestBatteryUnrestricted();
+    }
+  } catch (e) {
+    debugPrint('[Stories] Battery optimization prompt: $e');
   }
 }
 

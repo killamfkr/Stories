@@ -7,6 +7,7 @@ import 'package:audio_service/audio_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'audiobook_service.dart';
 import 'android_auto_ids.dart';
+import 'android_auto_browse.dart';
 import 'audiobook_prefs_keys.dart';
 import 'audio_handler.dart';
 import 'torrent_stream_service.dart';
@@ -1105,6 +1106,7 @@ class AudiobookPlayerService {
     );
     PlaytorrioCloudSyncService.instance.scheduleDebouncedSettingsPush();
     SettingsService.notifyAudiobookPrefsChanged();
+    AndroidAutoBrowse.invalidateCache();
   }
 
   Future<void> saveManualProgress() async {
@@ -1134,7 +1136,10 @@ class AudiobookPlayerService {
           ? pmRaw
           : (pmRaw is num ? pmRaw.toInt() : int.tryParse('$pmRaw') ?? 0);
 
-      final prepared = await AudiobookService().prepareAudiobookPlayback(book);
+      final prepared = await AudiobookService().prepareAudiobookPlayback(
+        book,
+        warmChapterIndex: chapterIndex,
+      );
       await loadBook(
         prepared.book,
         prepared.chapters,
@@ -1206,6 +1211,7 @@ class AudiobookPlayerService {
     await prefs.setStringList(AudiobookPrefsKeys.history, historyStrings);
     PlaytorrioCloudSyncService.instance.scheduleSettingsPush();
     SettingsService.notifyAudiobookPrefsChanged();
+    AndroidAutoBrowse.invalidateCache();
   }
 
   // --- Liked Books ---

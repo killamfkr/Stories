@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart' as mk;
 
 import 'audiobook_player_service.dart';
@@ -20,6 +21,20 @@ class PlayTorrioAudioHandler extends BaseAudioHandler
     _musicPlayer.stream.position.listen((_) => _updateMusicState());
     _musicPlayer.stream.playing.listen((_) => _updateMusicState());
     _musicPlayer.stream.buffering.listen((_) => _updateMusicState());
+    _publishIdlePlaybackState();
+    unawaited(AndroidAutoBrowse.warmCache());
+  }
+
+  void _publishIdlePlaybackState() {
+    playbackState.add(PlaybackState(
+      controls: const [MediaControl.play],
+      androidCompactActionIndices: const [0],
+      processingState: AudioProcessingState.idle,
+      playing: false,
+      updatePosition: Duration.zero,
+      bufferedPosition: Duration.zero,
+      speed: 1.0,
+    ));
   }
 
   void setPlayerType(AudioPlayerType type, dynamic player) {
@@ -148,10 +163,35 @@ class PlayTorrioAudioHandler extends BaseAudioHandler
   }
 
   @override
-  Future<void> playFromMediaId(String mediaId, [
+  ValueStream<Map<String, dynamic>> subscribeToChildren(String parentMediaId) {
+    return AndroidAutoBrowse.subscribeToChildren(parentMediaId);
+  }
+
+  @override
+  Future<void> prepareFromMediaId(
+    String mediaId, [
     Map<String, dynamic>? extras,
   ]) async {
-    await AndroidAutoBrowse.playMediaId(mediaId);
+    playbackState.add(
+      playbackState.nvalue!.copyWith(
+        processingState: AudioProcessingState.loading,
+      ),
+    );
+    try {
+      await AndroidAutoBrowse.playMediaId(mediaId);
+    } catch (e, st) {
+      debugPrint('Android Auto prepareFromMediaId failed: $e\n$st');
+      _publishIdlePlaybackState();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> playFromMediaId(
+    String mediaId, [
+    Map<String, dynamic>? extras,
+  ]) async {
+    await prepareFromMediaId(mediaId, extras);
   }
 
   @override
