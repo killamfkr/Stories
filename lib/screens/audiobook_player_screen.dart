@@ -181,22 +181,6 @@ class _AudiobookPlayerScreenState extends State<AudiobookPlayerScreen> {
     });
 
     try {
-      if (needsMagnet && magnet != null) {
-        if (!await TorrentStreamService().start()) {
-          throw Exception('Torrent engine failed to start');
-        }
-        final playIdx =
-            widget.initialChapterIndex.clamp(0, ch.length - 1);
-        final playChapter = ch[playIdx];
-        final fileIdx = playChapter.torrentFileIndex;
-        if (fileIdx != null) {
-          await TorrentStreamService().prefetchAudiobookChapter(
-            magnet,
-            fileIdx,
-            fileNameHint: playChapter.title,
-          );
-        }
-      }
       await Future.wait([
         _refreshDownloadState(ch.length),
         _service.loadBook(

@@ -376,13 +376,14 @@ class AudiobookPlayerService {
   Future<void> _waitUntilPlaybackReady({
     Audiobook? book,
     AudiobookChapter? chapter,
-    Duration timeout = const Duration(seconds: 45),
+    Duration timeout = const Duration(seconds: 20),
+    bool relaxedBuffer = false,
   }) async {
     final torrent = book != null &&
         chapter != null &&
         _isTorrentChapter(book, chapter);
     final deadline = DateTime.now().add(
-      torrent ? timeout : const Duration(seconds: 12),
+      torrent ? timeout : const Duration(seconds: 10),
     );
 
     while (DateTime.now().isBefore(deadline)) {
@@ -400,12 +401,15 @@ class AudiobookPlayerService {
       }
 
       if (torrent) {
-        if (st.duration > Duration.zero &&
-            st.buffer >= const Duration(seconds: 1) &&
-            !st.buffering) {
+        final minBuffer = relaxedBuffer
+            ? const Duration(milliseconds: 200)
+            : const Duration(milliseconds: 500);
+        if (st.duration > Duration.zero && st.playing && !st.buffering) {
           return;
         }
-        if (st.duration > Duration.zero && st.playing && !st.buffering) {
+        if (st.duration > Duration.zero &&
+            st.buffer >= minBuffer &&
+            !st.buffering) {
           return;
         }
       } else {
@@ -413,10 +417,47 @@ class AudiobookPlayerService {
         if (st.playing && !st.buffering && st.duration > Duration.zero) return;
       }
 
-      await Future.delayed(const Duration(milliseconds: 80));
+      await Future.delayed(const Duration(milliseconds: 50));
     }
 
     debugPrint('AudiobookPlayerService: playback ready wait timed out');
+  }
+
+  Future<void> _waitForTorrentDuration({
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final st = _player.state;
+      if (st.duration > Duration.zero) {
+        duration.value = st.duration;
+        return;
+      }
+      if (st.position > Duration.zero) return;
+      await Future.delayed(const Duration(milliseconds: 40));
+    }
+  }
+
+  Future<void> _quickTorrentSeek(Duration target) async {
+    _resumeTargetPosition = target;
+    _ignoreProgressPersistenceUntil =
+        DateTime.now().add(const Duration(seconds: 12));
+    _positionFloorMs = target.inMilliseconds;
+
+    for (var attempt = 0; attempt < 4; attempt++) {
+      await _player.seek(target);
+      await Future.delayed(Duration(milliseconds: 100 + attempt * 70));
+      final p = _player.state.position;
+      if (p > Duration.zero &&
+          (p - target).abs() < const Duration(seconds: 10)) {
+        _applyResolvedPosition(p);
+        _resumeTargetPosition = null;
+        return;
+      }
+    }
+
+    _applyResolvedPosition(target);
+    _resumeTargetPosition = null;
   }
 
   /// After play() on a stream, wait until duration/position is available before seeking.
@@ -440,52 +481,27 @@ class AudiobookPlayerService {
     await durSub.cancel();
   }
 
-  /// Seek repeatedly until mpv settles near [target] (loopback streams often snap to 0).
+  /// Seek repeatedly until mpv settles near [target] (HTTP streams).
   Future<void> _settleResumePosition(Duration target) async {
     _resumeTargetPosition = target;
     _ignoreProgressPersistenceUntil =
-        DateTime.now().add(const Duration(seconds: 20));
+        DateTime.now().add(const Duration(seconds: 15));
 
-    for (var attempt = 0; attempt < 12; attempt++) {
-      if (attempt == 4) {
-        await _player.pause();
-        await Future.delayed(const Duration(milliseconds: 200));
-      }
+    for (var attempt = 0; attempt < 6; attempt++) {
       await _player.seek(target);
-      if (attempt == 4) {
-        await _player.play();
-      }
-      await Future.delayed(Duration(milliseconds: 500 + attempt * 130));
+      await Future.delayed(Duration(milliseconds: 250 + attempt * 100));
       final p = _player.state.position;
       final delta = (p - target).abs();
       if (p > Duration.zero &&
           (delta < const Duration(seconds: 4) ||
               p >= target - const Duration(seconds: 2))) {
-        debugPrint(
-          'AudiobookPlayerService: resume seek settled ~${p.inSeconds}s '
-          '(target ${target.inSeconds}s, attempt ${attempt + 1})',
-        );
         _applyResolvedPosition(p);
         _resumeTargetPosition = null;
         return;
       }
     }
 
-    debugPrint(
-      'AudiobookPlayerService: resume seek may be inaccurate (target '
-      '${target.inSeconds}s, got ${_player.state.position.inSeconds}s) — retrying paused seek',
-    );
-    await _player.pause();
-    await _player.seek(target);
-    await Future.delayed(const Duration(milliseconds: 900));
-    await _player.play();
-    await Future.delayed(const Duration(milliseconds: 700));
-    final retried = _player.state.position;
-    if (retried > Duration.zero) {
-      _applyResolvedPosition(retried);
-    } else {
-      _applyResolvedPosition(target);
-    }
+    _applyResolvedPosition(target);
     _resumeTargetPosition = null;
   }
 
@@ -514,11 +530,12 @@ class AudiobookPlayerService {
     await p.setProperty('cache', 'yes');
     await p.setProperty('demuxer-max-bytes', '50000000');
     await p.setProperty('demuxer-max-back-bytes', '50000000');
-    await p.setProperty('demuxer-readahead-secs', torrentBacked ? '8' : '30');
+    await p.setProperty('demuxer-readahead-secs', torrentBacked ? '5' : '30');
     if (torrentBacked) {
       await p.setProperty('force-seekable', 'yes');
       try {
         await p.setProperty('demuxer-seekable-cache', 'yes');
+        await p.setProperty('cache-secs', '8');
       } catch (_) {}
     }
     _mpvAudiobookTuned = true;
@@ -698,19 +715,24 @@ class AudiobookPlayerService {
 
     _publishLoadingState();
 
-    // Optimize for streaming audiobooks (once per player).
     final torrentBacked = book.source == 'magnet' || book.source == 'audiobookbay';
+    final chapter = chapters[idx];
+    final torrentChapter = _isTorrentChapter(book, chapter);
     if (torrentBacked) {
       _streamClockUnreliable = true;
     }
-    await _ensureMpvAudiobookTuning(torrentBacked: torrentBacked);
 
     final needsSeek =
         resumePosition != null && resumePosition > Duration.zero;
     if (needsSeek) {
       _streamClockUnreliable = true;
     }
-    final media = await _mediaForChapter(book, chapters[idx]);
+
+    final prepResults = await Future.wait([
+      _ensureMpvAudiobookTuning(torrentBacked: torrentBacked),
+      _mediaForChapter(book, chapter),
+    ]);
+    final media = prepResults[1] as Media;
 
     if (needsSeek &&
         resumePosition != null &&
@@ -721,38 +743,43 @@ class AudiobookPlayerService {
       } catch (_) {}
     }
 
-    // Always open from the start; resume offset is applied via seek once buffered.
-    await _player.open(media, play: false);
-
     var resumeAlreadyPlaying = false;
     Duration? preparingPositionHint;
 
-    if (needsSeek) {
+    if (torrentChapter && needsSeek && resumePosition != null) {
       debugPrint(
-        'AudiobookPlayerService: Resuming chapter $idx at $resumePosition',
+        'AudiobookPlayerService: Fast torrent resume chapter $idx at $resumePosition',
       );
-      final torrentResume = _isTorrentChapter(book, chapters[idx]);
-      if (torrentResume) {
-        await _player.play();
-        await _waitForStreamPrime(
-          minWait: const Duration(milliseconds: 200),
-          timeout: const Duration(seconds: 10),
-        );
-        await _player.pause();
-        await Future.delayed(const Duration(milliseconds: 150));
-        await _waitForResumeReady(book, chapters[idx]);
-        await _settleResumePosition(resumePosition!);
-        await _playThroughHandler();
-        resumeAlreadyPlaying = true;
+      await _player.open(media, play: false);
+      await _waitForTorrentDuration(
+        timeout: const Duration(seconds: 5),
+      );
+      if (resumePosition > const Duration(seconds: 2)) {
+        await _quickTorrentSeek(resumePosition);
       } else {
+        position.value = resumePosition;
+        _positionFloorMs = resumePosition.inMilliseconds;
+      }
+      await _player.play();
+      resumeAlreadyPlaying = true;
+      preparingPositionHint = resumePosition;
+    } else if (torrentChapter) {
+      await _player.open(media, play: true);
+      resumeAlreadyPlaying = true;
+    } else {
+      await _player.open(media, play: false);
+      if (needsSeek && resumePosition != null) {
+        debugPrint(
+          'AudiobookPlayerService: Resuming chapter $idx at $resumePosition',
+        );
         await _player.play();
         resumeAlreadyPlaying = true;
-        await _waitForResumeReady(book, chapters[idx]);
-        await _settleResumePosition(resumePosition!);
+        await _waitForResumeReady(book, chapter);
+        await _settleResumePosition(resumePosition);
+        preparingPositionHint = position.value > Duration.zero
+            ? position.value
+            : resumePosition;
       }
-      preparingPositionHint = position.value > Duration.zero
-          ? position.value
-          : resumePosition;
     }
 
     if (!resumeAlreadyPlaying) {
@@ -761,7 +788,11 @@ class AudiobookPlayerService {
 
     await _waitUntilPlaybackReady(
       book: book,
-      chapter: chapters[idx],
+      chapter: chapter,
+      timeout: torrentChapter
+          ? const Duration(seconds: 15)
+          : const Duration(seconds: 12),
+      relaxedBuffer: torrentChapter,
     );
     _isResuming = false;
     await _applyPlaybackRate(force: true);

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:libtorrent_flutter/libtorrent_flutter.dart';
 import 'package:path/path.dart' as p;
@@ -209,6 +211,7 @@ class TorrentStreamService {
     bool allowNonStreamable = false,
     bool stopSiblingStreams = true,
     String? fileNameHint,
+    bool primeBuffer = false,
   }) async {
     if (_state != EngineState.ready) {
       final started = await start();
@@ -310,6 +313,9 @@ class TorrentStreamService {
           _log(
             'Audiobook stream started idx=$streamIdx file=${fi.name} → ${streamInfo.url}',
           );
+          if (primeBuffer) {
+            await _primeAudiobookStreamUrl(streamInfo.url);
+          }
           return streamInfo.url;
         } catch (e) {
           _log('Audiobook startStream failed (attempt $attempt): $e');
@@ -379,7 +385,29 @@ class TorrentStreamService {
       allowNonStreamable: true,
       stopSiblingStreams: false,
       fileNameHint: fileNameHint,
+      primeBuffer: true,
     );
+  }
+
+  /// Pull the first chunk through the loopback stream so mpv can start sooner.
+  Future<void> _primeAudiobookStreamUrl(String url) async {
+    final client = HttpClient();
+    try {
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set(HttpHeaders.rangeHeader, 'bytes=0-');
+      final res = await req.close().timeout(const Duration(seconds: 5));
+      var received = 0;
+      const targetBytes = 384 * 1024;
+      await for (final chunk in res) {
+        received += chunk.length;
+        if (received >= targetBytes) break;
+      }
+      _log('Primed stream buffer (~${received ~/ 1024} KB)');
+    } catch (e) {
+      _log('Stream prime skipped: $e');
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// Stops audiobook streams and drops the torrent for this magnet.
