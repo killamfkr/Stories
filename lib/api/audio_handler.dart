@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:media_kit/media_kit.dart' as mk;
+import 'package:rxdart/rxdart.dart';
 
 import 'audiobook_player_service.dart';
 import 'music_player_service.dart';
@@ -173,7 +174,7 @@ class PlayTorrioAudioHandler extends BaseAudioHandler
     Map<String, dynamic>? extras,
   ]) async {
     playbackState.add(
-      playbackState.nvalue!.copyWith(
+      playbackState.value.copyWith(
         processingState: AudioProcessingState.loading,
       ),
     );
