@@ -135,7 +135,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          NOTES="$(cat <<EOF
+          if [[ -f release_notes.md ]]; then
+            NOTES="$(cat release_notes.md)"
+          else
+            NOTES="$(cat <<EOF
           Pre-release APK for Stories **${RELEASE_TAG}**.
 
           Built from commit ${GITHUB_SHA} on run ${GITHUB_RUN_ID}.
@@ -143,6 +146,7 @@ jobs:
           Bump the app version in \`pubspec.yaml\` to start a new release line.
           EOF
           )"
+          fi
 
           if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
             gh release upload "${RELEASE_TAG}" "${APK_NAME}" --clobber
