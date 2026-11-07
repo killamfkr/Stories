@@ -121,6 +121,14 @@ class AudiobookService {
   static const String _abbUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+  /// Hard stop so a broken pagination loop cannot scrape indefinitely.
+  static const int _abbAbsoluteMaxPages = 500;
+
+  /// Cap for multi-page search (still thousands of titles; avoids multi-minute scrapes).
+  static const int _abbSearchMaxPages = 150;
+
+  static final RegExp _abbPagePathRe = RegExp(r'/page/(\d+)/');
+
   static final RegExp _abbHashRe = RegExp(
     r'Info Hash:</td>\s*<td[^>]*>\s*([a-fA-F0-9]{40})\s*</td>',
     caseSensitive: false,
@@ -163,6 +171,13 @@ class AudiobookService {
 
   Future<List<Audiobook>> getAudiobooks({int offset = 0, int limit = 12}) async {
     try {
+      final abb = await _abbBrowseHomepage(offset: offset, limit: limit);
+      if (abb.isNotEmpty) return abb;
+    } catch (e) {
+      debugPrint('AudiobookService Error (getAudiobooks/abb): $e');
+    }
+
+    try {
       final payload = {
         "offset": offset,
         "limit": limit,
@@ -184,11 +199,9 @@ class AudiobookService {
         if (list.isNotEmpty) return list;
       }
     } catch (e) {
-      debugPrint('AudiobookService Error (getAudiobooks): $e');
+      debugPrint('AudiobookService Error (getAudiobooks/tokybook): $e');
     }
-    debugPrint(
-        'AudiobookService: Tokybook browse empty/unavailable — using Audiobook Bay.');
-    return _abbBrowseHomepage(offset: offset, limit: limit);
+    return [];
   }
 
   String _cleanTitle(String title) {
@@ -1148,37 +1161,104 @@ class AudiobookService {
     return results;
   }
 
-  Future<List<Audiobook>> _fetchAbbBooksFromPageUrl(String pageUrl,
-      {int? maxItems}) async {
+  Future<hdom.Document?> _abbFetchListingDocument(String pageUrl) async {
     try {
       final response = await http.get(Uri.parse(pageUrl), headers: {
         'User-Agent': _abbUserAgent,
         'Accept': 'text/html,*/*',
         'Referer': '$_abbOrigin/',
       });
-      if (response.statusCode != 200) return [];
-      final document = hp.parse(response.body);
-      return _abbParseIndexPosts(document, maxItems: maxItems);
+      if (response.statusCode != 200) return null;
+      return hp.parse(response.body);
     } catch (e) {
-      debugPrint('AudiobookService Error (_fetchAbbBooksFromPageUrl): $e');
+      debugPrint('AudiobookService Error (_abbFetchListingDocument): $e');
     }
-    return [];
+    return null;
   }
 
-  /// Fallback browse when Tokybook fails — pulls recent posts from Audiobook Bay.
+  Future<List<Audiobook>> _fetchAbbBooksFromPageUrl(String pageUrl,
+      {int? maxItems}) async {
+    final document = await _abbFetchListingDocument(pageUrl);
+    if (document == null) return [];
+    return _abbParseIndexPosts(document, maxItems: maxItems);
+  }
+
+  String _abbBrowsePageUrl(int page) =>
+      page <= 1 ? '$_abbOrigin/' : '$_abbOrigin/page/$page/';
+
+  String _abbSearchPageUrl(String query, int page) {
+    final q = Uri.encodeQueryComponent(query);
+    if (page <= 1) {
+      return Uri.parse(_abbOrigin).replace(queryParameters: {'s': query}).toString();
+    }
+    return '$_abbOrigin/page/$page/?s=$q';
+  }
+
+  int _abbLastPageFromDocument(hdom.Document document) {
+    var last = 1;
+    for (final a in document.querySelectorAll('.wp-pagenavi a')) {
+      final href = a.attributes['href'] ?? '';
+      final title = a.attributes['title'] ?? '';
+      final fromHref = _abbPagePathRe.firstMatch(href);
+      if (fromHref != null) {
+        final n = int.tryParse(fromHref.group(1) ?? '');
+        if (n != null && n > last) last = n;
+      }
+      final fromTitle = int.tryParse(title.trim());
+      if (fromTitle != null && fromTitle > last) last = fromTitle;
+    }
+    final current = document.querySelector('.wp-pagenavi .current');
+    if (current != null) {
+      final n = int.tryParse(current.text.trim());
+      if (n != null && n > last) last = n;
+    }
+    return last;
+  }
+
+  Future<List<Audiobook>> _abbCollectListingPages({
+    required String Function(int page) pageUrlFor,
+    int? minItems,
+    required int maxPages,
+  }) async {
+    final buffer = <Audiobook>[];
+    final seenPageUrls = <String>{};
+    var lastPage = 1;
+
+    for (var page = 1; page <= maxPages; page++) {
+      if (page > _abbAbsoluteMaxPages) break;
+      final document = await _abbFetchListingDocument(pageUrlFor(page));
+      if (document == null) break;
+      if (page == 1) {
+        final detected = _abbLastPageFromDocument(document);
+        lastPage = detected.clamp(1, _abbAbsoluteMaxPages);
+      }
+      final pageCap = lastPage < maxPages ? lastPage : maxPages;
+
+      final chunk = _abbParseIndexPosts(document);
+      if (chunk.isEmpty) break;
+
+      for (final book in chunk) {
+        final key = book.pageUrl ?? book.uuid;
+        if (key.isEmpty) continue;
+        if (seenPageUrls.add(key)) buffer.add(book);
+      }
+
+      if (minItems != null && buffer.length >= minItems) break;
+      if (page >= pageCap) break;
+    }
+    return buffer;
+  }
+
+  /// Primary browse catalog — paginates Audiobook Bay index until [offset]+[limit] are available.
   Future<List<Audiobook>> _abbBrowseHomepage(
       {required int offset, required int limit}) async {
     if (limit <= 0) return [];
     final need = offset + limit;
-    final buffer = <Audiobook>[];
-    const maxPages = 20;
-    for (var page = 1; page <= maxPages && buffer.length < need; page++) {
-      final url =
-          page == 1 ? '$_abbOrigin/' : '$_abbOrigin/page/$page/';
-      final chunk = await _fetchAbbBooksFromPageUrl(url);
-      if (chunk.isEmpty) break;
-      buffer.addAll(chunk);
-    }
+    final buffer = await _abbCollectListingPages(
+      pageUrlFor: _abbBrowsePageUrl,
+      minItems: need,
+      maxPages: _abbAbsoluteMaxPages,
+    );
     if (offset >= buffer.length) return [];
     return buffer.skip(offset).take(limit).toList();
   }
@@ -1188,16 +1268,11 @@ class AudiobookService {
       final q = query.trim();
       if (q.isEmpty) return [];
 
-      final uri = Uri.parse(_abbOrigin).replace(queryParameters: {'s': q});
-      final response = await http.get(uri, headers: {
-        'User-Agent': _abbUserAgent,
-        'Accept': 'text/html,*/*',
-        'Referer': '$_abbOrigin/',
-      });
-      if (response.statusCode != 200) return [];
-
-      final document = hp.parse(response.body);
-      return _abbParseIndexPosts(document);
+      return await _abbCollectListingPages(
+        pageUrlFor: (page) => _abbSearchPageUrl(q, page),
+        minItems: null,
+        maxPages: _abbSearchMaxPages,
+      );
     } catch (e) {
       debugPrint('AudiobookService Error (_searchAudiobookBay): $e');
     }
