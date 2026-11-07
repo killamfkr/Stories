@@ -67,6 +67,12 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Seed libtorrent Flutter prebuilt native libs
+        run: |
+          set -euo pipefail
+          chmod +x tool/seed_libtorrent_prebuilts.sh
+          bash tool/seed_libtorrent_prebuilts.sh
+
       - name: Patch audio_service for Android Auto
         run: bash tool/patch_audio_service.sh
 
@@ -101,7 +107,9 @@ jobs:
               "--dart-define=PLAYTORRIO_SUPABASE_ANON_KEY=${PLAYTORRIO_SUPABASE_ANON_KEY}"
             )
           fi
-          flutter build apk --release "${build_args[@]}"
+          flutter build apk --release \
+            -PlibtorrentFlutterSkipDownload=true \
+            "${build_args[@]}"
 
       - name: Prepare release APK
         run: |
