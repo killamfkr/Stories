@@ -11,6 +11,12 @@ if [[ ! -f "$DEST_MANIFEST" ]]; then
   exit 1
 fi
 
+GRADLE_WRAPPER="$ROOT/android/gradle/wrapper/gradle-wrapper.properties"
+if [[ -f "$GRADLE_WRAPPER" ]]; then
+  # Flutter 3.47+ requires Gradle 8.14+; flutter create may ship an older wrapper.
+  sed -i 's#gradle-[0-9.]*-all.zip#gradle-8.14-all.zip#' "$GRADLE_WRAPPER"
+fi
+
 SRC_MANIFEST="$ROOT/tool/android/AndroidManifest.xml"
 if [[ -f "$SRC_MANIFEST" ]]; then
   cp "$SRC_MANIFEST" "$DEST_MANIFEST"
