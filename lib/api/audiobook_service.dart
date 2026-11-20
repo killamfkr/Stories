@@ -125,7 +125,7 @@ class AudiobookService {
   static const int _abbAbsoluteMaxPages = 500;
 
   /// Cap for multi-page search (still thousands of titles; avoids multi-minute scrapes).
-  static const int _abbSearchMaxPages = 1000;
+  static const int _abbSearchMaxPages = 50;
 
   static final RegExp _abbPagePathRe = RegExp(r'/page/(\d+)/');
 
